@@ -286,10 +286,27 @@ async function doPuppeteerSearch(bin) {
         } catch (e) {
             console.log('⚠️ No se detectó "Cargando..."');
         }
+        
+        // Espera fija de 10 segundos
+        console.log('⏳ Esperando carga inicial (10 segundos)...');
+        await new Promise(resolve => setTimeout(resolve, 10000));
 
-        // ESPERA PRINCIPAL (ajustable, 60 segundos funciona local, en nube quizás más)
-        console.log('⏳ Esperando carga de datos (60 segundos)...');
-        await new Promise(resolve => setTimeout(resolve, 60000));
+        // Verificar si hay datos reales en .protected-content
+        const tieneDatos = await page.evaluate(() => {
+            const container = document.querySelector('.protected-content');
+            if (!container) return false;
+            const texto = container.innerText;
+            // Si ya no contiene "Cargando tarjetas" y hay al menos un número de 16 dígitos
+            return !texto.includes('Cargando tarjetas') && /\d{16}/.test(texto);
+        });
+
+        if (!tieneDatos) {
+            console.log('⚠️ Aún no hay datos después de 10s, esperando 5 segundos más...');
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            console.log('✅ Continuando con extracción después de espera extra.');
+        } else {
+            console.log('✅ Datos detectados después de 10 segundos.');
+        }
 
         // ========== MÚLTIPLES MÉTODOS DE EXTRACCIÓN ==========
         let allTexts = [];
