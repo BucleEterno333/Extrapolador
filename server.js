@@ -287,9 +287,9 @@ async function doPuppeteerSearch(bin) {
             console.log('⚠️ No se detectó "Cargando..."');
         }
 
-        // ESPERA PRINCIPAL (ajustable, 20 segundos funciona local, en nube quizás más)
-        console.log('⏳ Esperando carga de datos (20 segundos)...');
-        await new Promise(resolve => setTimeout(resolve, 20000));
+        // ESPERA PRINCIPAL (ajustable, 60 segundos funciona local, en nube quizás más)
+        console.log('⏳ Esperando carga de datos (60 segundos)...');
+        await new Promise(resolve => setTimeout(resolve, 60000));
 
         // ========== MÚLTIPLES MÉTODOS DE EXTRACCIÓN ==========
         let allTexts = [];
