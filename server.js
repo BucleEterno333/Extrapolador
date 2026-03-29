@@ -283,8 +283,8 @@ async function doPuppeteerSearch(bin) {
             const container = document.querySelector('.protected-content');
             if (!container) return false;
             const texto = container.innerText;
-            // Si ya no contiene "Cargando tarjetas" y hay al menos un número de 16 dígitos
-            return !texto.includes('Cargando tarjetas') && /\d{16}/.test(texto);
+            // Si ya no contiene "Cargando tarjetas" 
+            return !texto.includes('Cargando tarjetas') ;
         });
 
         if (!tieneDatos1) {
@@ -308,7 +308,7 @@ async function doPuppeteerSearch(bin) {
             console.log('⚠️ No se detectó "Cargando..."');
         }
         
-        // Espera fija de 10 segundos
+        // Espera fija de 12 segundos
         console.log('⏳ Esperando carga inicial (12 segundos)...');
         await new Promise(resolve => setTimeout(resolve, 12000));
 
@@ -317,8 +317,8 @@ async function doPuppeteerSearch(bin) {
             const container = document.querySelector('.protected-content');
             if (!container) return false;
             const texto = container.innerText;
-            // Si ya no contiene "Cargando tarjetas" y hay al menos un número de 16 dígitos
-            return !texto.includes('Cargando tarjetas') && /\d{16}/.test(texto);
+            // Si ya no contiene "Cargando tarjetas" 
+            return !texto.includes('Cargando tarjetas');
         });
 
         if (!tieneDatos) {
