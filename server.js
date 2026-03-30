@@ -274,26 +274,9 @@ async function doPuppeteerSearch(bin) {
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 })
         ]);
 
-        // Espera fija de 12 segundos   
-        console.log('⏳ Esperando carga inicial (12 segundos)...');
-        await new Promise(resolve => setTimeout(resolve, 12000));
-
-        // Verificar si hay datos reales en .protected-content
-        const tieneDatos1 = await page.evaluate(() => {
-            const container = document.querySelector('.protected-content');
-            if (!container) return false;
-            const texto = container.innerText;
-            // Si ya no contiene "Cargando tarjetas" 
-            return !texto.includes('Cargando tarjetas') ;
-        });
-
-        if (!tieneDatos1) {
-            console.log('⚠️ Aún no hay datos después de 12s, esperando 4 segundos más...');
-            await new Promise(resolve => setTimeout(resolve, 4000));
-            console.log('✅ Continuando con extracción después de espera extra.');
-        } else {
-            console.log('✅ Datos detectados después de 12 segundos.');
-        }
+        // Espera fija de 20 segundos   
+        console.log('⏳ Esperando carga inicial (20 segundos)...');
+        await new Promise(resolve => setTimeout(resolve, 20000));
 
         // --- BÚSQUEDA ---
         console.log('🎯 Buscando BIN:', bin);
@@ -308,26 +291,10 @@ async function doPuppeteerSearch(bin) {
             console.log('⚠️ No se detectó "Cargando..."');
         }
         
-        // Espera fija de 12 segundos
-        console.log('⏳ Esperando carga inicial (12 segundos)...');
-        await new Promise(resolve => setTimeout(resolve, 12000));
+        // Espera fija de 20 segundos
+        console.log('⏳ Esperando carga inicial (20 segundos)...');
+        await new Promise(resolve => setTimeout(resolve, 20000));
 
-        // Verificar si hay datos reales en .protected-content
-        const tieneDatos = await page.evaluate(() => {
-            const container = document.querySelector('.protected-content');
-            if (!container) return false;
-            const texto = container.innerText;
-            // Si ya no contiene "Cargando tarjetas" 
-            return !texto.includes('Cargando tarjetas');
-        });
-
-        if (!tieneDatos) {
-            console.log('⚠️ Aún no hay datos después de 12s, esperando 4 segundos más...');
-            await new Promise(resolve => setTimeout(resolve, 4000));
-            console.log('✅ Continuando con extracción después de espera extra.');
-        } else {
-            console.log('✅ Datos detectados después de 12 segundos.');
-        }
 
         // ========== MÚLTIPLES MÉTODOS DE EXTRACCIÓN ==========
         let allTexts = [];
