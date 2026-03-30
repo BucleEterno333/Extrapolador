@@ -274,9 +274,9 @@ async function doPuppeteerSearch(bin) {
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 })
         ]);
 
-        // Espera fija de 12 segundos   
-        console.log('⏳ Esperando carga inicial (12 segundos)...');
-        await new Promise(resolve => setTimeout(resolve, 12000));
+        // Espera fija de 15 segundos   
+        console.log('⏳ Esperando carga inicial (15 segundos)...');
+        await new Promise(resolve => setTimeout(resolve, 15000));
 
         // --- BÚSQUEDA ---
         console.log('🎯 Buscando BIN:', bin);
@@ -292,8 +292,8 @@ async function doPuppeteerSearch(bin) {
         }
         
         // Espera fija de 12 segundos
-        console.log('⏳ Esperando carga inicial (12 segundos)...');
-        await new Promise(resolve => setTimeout(resolve, 12000));
+        console.log('⏳ Esperando carga inicial (15 segundos)...');
+        await new Promise(resolve => setTimeout(resolve, 15000));
 
 
         // ========== MÚLTIPLES MÉTODOS DE EXTRACCIÓN ==========
