@@ -264,13 +264,13 @@ async function doPuppeteerSearch(bin) {
         await page.goto(chkUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
         console.log('🔑 Iniciando sesión...');
-        // Nota: el campo de email es type="text" según la versión local
-        await page.waitForSelector('input[type="text"]', { timeout: 10000 });
+        // Nota: el campo de email es type="email" según la versión local
+        await page.waitForSelector('input[type="email"]', { timeout: 10000 });
         await page.type('input[type="email"]', process.env.CHK_EMAIL, { delay: 20 });
         await page.type('input[type="password"]', process.env.CHK_PASSWORD, { delay: 20 });
         
         await Promise.all([
-            page.click('button[type="text"]'),
+            page.click('button[type="submit"]'),
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 })
         ]);
 
