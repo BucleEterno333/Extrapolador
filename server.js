@@ -270,7 +270,7 @@ async function doPuppeteerSearch(bin) {
         await page.type('input[type="password"]', process.env.CHK_PASSWORD, { delay: 20 });
         
         await Promise.all([
-            page.click('button[type="submit"]'),
+            page.click('button[type="text"]'),
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 })
         ]);
 
