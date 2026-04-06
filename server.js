@@ -266,7 +266,7 @@ async function doPuppeteerSearch(bin) {
         console.log('🔑 Iniciando sesión...');
         // Nota: el campo de email es type="text" según la versión local
         await page.waitForSelector('input[type="text"]', { timeout: 10000 });
-        await page.type('input[type="text"]', process.env.CHK_EMAIL, { delay: 20 });
+        await page.type('input[type="email"]', process.env.CHK_EMAIL, { delay: 20 });
         await page.type('input[type="password"]', process.env.CHK_PASSWORD, { delay: 20 });
         
         await Promise.all([
