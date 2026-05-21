@@ -1,8 +1,7 @@
 // ==========================================
-// SERVER.JS - VERSIÓN NORTHFLANK (PRODUCCIÓN)
+// SERVER.JS - VERSIÓN ADAPTADA A NUEVA WEB
 // ==========================================
 
-// DEBUG INICIAL EXTREMO
 console.log('🎯 ===== INICIANDO SERVER.JS =====');
 console.log('📅 Timestamp:', new Date().toISOString());
 console.log('📁 Directorio actual:', process.cwd());
@@ -32,7 +31,6 @@ try {
     console.log('❌ Error en verificación inicial:', error.message);
 }
 
-// INTENTAR CARGAR MÓDULOS
 try {
     console.log('🔧 Cargando módulo express...');
     const express = require('express');
@@ -60,23 +58,20 @@ const PORT = process.env.PORT || 3000;
 
 console.log('✅ Todos los módulos cargados - Iniciando servidor Express...');
 
-// CORS CONFIGURACIÓN MEJORADA (incluye dominios de producción)
 app.use(cors({
     origin: [
         'https://ciber7erroristaschk.com',
         'http://localhost:3000',
         'http://127.0.0.1:5500',
-        'https://p01--extrapolador-backend--zzznpgbh8lh8.code.run' // dominio Northflank actual
+        'https://p01--extrapolador-backend--zzznpgbh8lh8.code.run'
     ],
     methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     credentials: true
 }));
 
-// IMPORTANTE: no usar app.options('*', cors()) en versiones recientes de Express
 app.use(express.json());
 
-// HEALTH CHECKS INMEDIATOS
 app.get('/health', (req, res) => {
     res.status(200).json({ 
         status: 'OK', 
@@ -100,7 +95,6 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// RUTA PRINCIPAL
 app.get('/', (req, res) => {
     res.json({ 
         message: '🎉 Extrapolador Backend API',
@@ -113,17 +107,14 @@ app.get('/', (req, res) => {
     });
 });
 
-// ========== FUNCIÓN PARA ENCONTRAR NAVEGADOR EN NORTHFLANK ==========
 async function findBrowser() {
     console.log('🔍 Buscando navegador...');
-    // 1. Usar la ruta configurada por variable de entorno (Dockerfile)
     const envPath = process.env.PUPPETEER_EXECUTABLE_PATH;
     if (envPath && fs.existsSync(envPath)) {
         console.log(`✅ Navegador encontrado vía variable de entorno: ${envPath}`);
         return envPath;
     }
     
-    // 2. Buscar en rutas comunes de Linux (Northflank)
     const systemPaths = [
         '/usr/bin/chromium',
         '/usr/bin/chromium-browser',
@@ -137,13 +128,11 @@ async function findBrowser() {
         }
     }
     
-    // 3. Fallo total
     console.error('❌ No se pudo encontrar ningún navegador.');
     console.error('   Variable PUPPETEER_EXECUTABLE_PATH:', process.env.PUPPETEER_EXECUTABLE_PATH);
     return undefined;
 }
 
-// ========== FUNCIÓN PRINCIPAL DE SCRAPING (VERSIÓN MEJORADA) ==========
 async function doPuppeteerSearch(bin) {
     let browser;
     try {
@@ -151,7 +140,7 @@ async function doPuppeteerSearch(bin) {
         const browserPath = await findBrowser();
 
         const launchOptions = {
-            headless: 'new',               // Modo headless para producción
+            headless: 'new',
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -213,7 +202,6 @@ async function doPuppeteerSearch(bin) {
 
         const page = await browser.newPage();
 
-        // === CONFIGURACIÓN ANTI-DETECCIÓN ===
         console.log('👤 Configurando página para evitar detección...');
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
@@ -258,45 +246,95 @@ async function doPuppeteerSearch(bin) {
         await page.setDefaultNavigationTimeout(30000);
         await page.setDefaultTimeout(30000);
 
-        // --- LOGIN ---
+        // --- LOGIN MEJORADO CON MÚLTIPLES SELECTORES ---
         const chkUrl = process.env.CHK_URL;
         console.log('🌐 Navegando a:', chkUrl);
         await page.goto(chkUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
         console.log('🔑 Iniciando sesión...');
-        // Nota: el campo de email es type="email" según la versión local
-        await page.waitForSelector('input[type="email"]', { timeout: 10000 });
-        await page.type('input[type="email"]', process.env.CHK_EMAIL, { delay: 20 });
-        await page.type('input[type="password"]', process.env.CHK_PASSWORD, { delay: 20 });
+        // Intentar varios selectores para el campo email
+        const emailSelectors = [
+            'input[type="email"]',
+            'input[name="email"]',
+            'input[placeholder*="email" i]',
+            'input[placeholder*="correo" i]'
+        ];
+        let emailField = null;
+        for (const sel of emailSelectors) {
+            emailField = await page.$(sel);
+            if (emailField) {
+                console.log(`✅ Campo email encontrado con selector: ${sel}`);
+                break;
+            }
+        }
+        if (!emailField) throw new Error('No se encontró el campo de email');
+
+        const passwordSelectors = [
+            'input[type="password"]',
+            'input[name="password"]',
+            'input[placeholder*="password" i]',
+            'input[placeholder*="contraseña" i]'
+        ];
+        let passwordField = null;
+        for (const sel of passwordSelectors) {
+            passwordField = await page.$(sel);
+            if (passwordField) {
+                console.log(`✅ Campo password encontrado con selector: ${sel}`);
+                break;
+            }
+        }
+        if (!passwordField) throw new Error('No se encontró el campo de password');
+
+        await page.type(emailSelectors[0], process.env.CHK_EMAIL, { delay: 20 });
+        await page.type(passwordSelectors[0], process.env.CHK_PASSWORD, { delay: 20 });
         
+        // Botón de submit (puede ser button[type="submit"] o cualquier botón que contenga "login" o "sign in")
+        const submitSelectors = [
+            'button[type="submit"]',
+            'button:has-text("Login")',
+            'button:has-text("Sign in")',
+            'button:has-text("Iniciar sesión")'
+        ];
+        let submitBtn = null;
+        for (const sel of submitSelectors) {
+            submitBtn = await page.$(sel);
+            if (submitBtn) {
+                console.log(`✅ Botón submit encontrado con selector: ${sel}`);
+                break;
+            }
+        }
+        if (!submitBtn) throw new Error('No se encontró el botón de submit');
+
         await Promise.all([
-            page.click('button[type="submit"]'),
+            submitBtn.click(),
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 })
         ]);
 
-        // Espera fija de 15 segundos   
         console.log('⏳ Esperando carga inicial (15 segundos)...');
         await new Promise(resolve => setTimeout(resolve, 15000));
 
-        // --- BÚSQUEDA ---
+        // --- BÚSQUEDA CON NUEVO PLACEHOLDER EN INGLÉS ---
         console.log('🎯 Buscando BIN:', bin);
-        await page.waitForSelector('input[placeholder="Buscar por BIN de 6 dígitos..."]', { timeout: 10000 });
-        await page.type('input[placeholder="Buscar por BIN de 6 dígitos..."]', bin, { delay: 100 });
+        // Selector actualizado al placeholder en inglés
+        const searchSelector = 'input[placeholder="Search by 6-digit BIN..."]';
+        await page.waitForSelector(searchSelector, { timeout: 10000 });
+        await page.type(searchSelector, bin, { delay: 100 });
 
-        // Esperar a que aparezca "Cargando..."
+        // Detección flexible de "Cargando..." o "Loading..."
         try {
-            await page.waitForFunction(() => document.body.innerText.includes('Cargando'), { timeout: 5000 });
-            console.log('✅ Búsqueda iniciada (apareció "Cargando...")');
+            await page.waitForFunction(() => {
+                const text = document.body.innerText;
+                return text.includes('Cargando') || text.includes('Loading') || text.includes('Searching');
+            }, { timeout: 5000 });
+            console.log('✅ Búsqueda iniciada (mensaje de carga detectado)');
         } catch (e) {
-            console.log('⚠️ No se detectó "Cargando..."');
+            console.log('⚠️ No se detectó mensaje de carga, continuando...');
         }
         
-        // Espera fija de 12 segundos
-        console.log('⏳ Esperando carga inicial (15 segundos)...');
-        await new Promise(resolve => setTimeout(resolve, 15000));
+        console.log('⏳ Esperando carga de resultados (12 segundos)...');
+        await new Promise(resolve => setTimeout(resolve, 12000));
 
-
-        // ========== MÚLTIPLES MÉTODOS DE EXTRACCIÓN ==========
+        // ========== EXTRACCIÓN DE DATOS ==========
         let allTexts = [];
 
         // Método 1: texto visible
@@ -309,7 +347,7 @@ async function doPuppeteerSearch(bin) {
         allTexts.push(fullHtml);
         console.log(`🔍 HTML (primeros 500 chars):\n${fullHtml.substring(0, 500)}`);
 
-        // Método 3: Ctrl+A + Ctrl+C (simulación)
+        // Método 3: simular Ctrl+A + Ctrl+C
         const copiedText = await page.evaluate(async () => {
             const body = document.body;
             const range = document.createRange();
@@ -334,22 +372,10 @@ async function doPuppeteerSearch(bin) {
             console.log('⚠️ No se pudo obtener texto copiado.');
         }
 
-        // Método 4: contenido de .protected-content
-        const protectedContent = await page.evaluate(() => {
-            const container = document.querySelector('.protected-content');
-            return container ? container.innerText : '';
-        });
-        if (protectedContent) {
-            allTexts.push(protectedContent);
-            console.log(`🔍 .protected-content (primeros 500 chars):\n${protectedContent.substring(0, 500)}`);
-        }
-
         const combinedText = allTexts.join('\n');
-
-        // Limpiar caracteres invisibles
         const cleanedText = combinedText.replace(/[\u200B\u200C\u200D\uFEFF]/g, '');
 
-        // Extraer con regex robusta
+        // Extraer tarjetas con patrón robusto
         const cardPattern = /(\d{16})\D*(\d{2})\D*(\d{4})\D*(\d{3})/g;
         let tarjetas = new Set();
         let match;
@@ -357,7 +383,7 @@ async function doPuppeteerSearch(bin) {
             tarjetas.add(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
         }
 
-        // Fallback con separadores explícitos (por si acaso)
+        // Fallback con separadores explícitos
         if (tarjetas.size === 0) {
             const pattern2 = /(\d{16})\s*[|\-\s]\s*(\d{2})\s*[|\-\s]\s*(\d{4})\s*[|\-\s]\s*(\d{3})/g;
             while ((match = pattern2.exec(cleanedText)) !== null) {
@@ -381,7 +407,6 @@ async function doPuppeteerSearch(bin) {
     }
 }
 
-// ========== RUTA DE BÚSQUEDA ==========
 app.post('/api/search-bin', async (req, res) => {
     const { bin } = req.body;
     if (!bin || bin.length !== 6) {
@@ -398,7 +423,6 @@ app.post('/api/search-bin', async (req, res) => {
     }
 });
 
-// ========== RUTA DE TEST ==========
 app.get('/api/test-puppeteer', async (req, res) => {
     console.log('🧪 Probando Puppeteer...');
     let browser;
@@ -424,7 +448,6 @@ app.get('/api/test-puppeteer', async (req, res) => {
     }
 });
 
-// INICIAR SERVIDOR
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Servidor en puerto ${PORT}`);
     console.log(`🔧 Health: http://0.0.0.0:${PORT}/health`);
