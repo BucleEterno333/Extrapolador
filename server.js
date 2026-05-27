@@ -1,5 +1,5 @@
 // ==========================================
-// SERVER.JS - VERSIÓN DEFINITIVA (CON EXTRACCIÓN FUNCIONAL)
+// SERVER.JS - VERSIÓN FINAL CON EXTRACCIÓN MEJORADA
 // ==========================================
 
 console.log('🎯 ===== INICIANDO SERVER.JS =====');
@@ -63,7 +63,7 @@ async function findBrowser() {
     return undefined;
 }
 
-// ========== FUNCIÓN PRINCIPAL (CON EXTRACCIÓN DE LA VERSIÓN ANTIGUA) ==========
+// ========== FUNCIÓN PRINCIPAL ==========
 async function doPuppeteerSearch(bin) {
     let browser;
     try {
@@ -99,15 +99,14 @@ async function doPuppeteerSearch(bin) {
         console.log('✅ Login completado');
         await new Promise(r => setTimeout(r, 5000));
 
-        // BÚSQUEDA DEL BIN (MEJORADA)
+        // BÚSQUEDA DEL BIN
         console.log(`🎯 Buscando BIN: ${bin}`);
-        // Esperar el campo de búsqueda
         await page.waitForSelector('input[placeholder="Search by 6-digit BIN..."]', { timeout: 10000 });
         const searchInput = await page.$('input[placeholder="Search by 6-digit BIN..."]');
         await searchInput.click({ clickCount: 3 });
         await searchInput.type(bin, { delay: 100 });
 
-        // Forzar eventos para que el sitio detecte el cambio
+        // Disparar eventos para que el filtro se actualice
         await page.evaluate(() => {
             const input = document.querySelector('input[placeholder="Search by 6-digit BIN..."]');
             if (input) {
@@ -116,30 +115,31 @@ async function doPuppeteerSearch(bin) {
             }
         });
 
-        // Presionar Enter (más fiable que buscar botón)
-        console.log('⏳ Presionando Enter para buscar...');
+        // Presionar Enter (por si acaso)
         await searchInput.press('Enter');
-        
-        // Esperar a que aparezca una tabla con datos (no un simple tr vacío)
-        console.log('⏳ Esperando resultados reales...');
+
+        // Esperar a que aparezca UNA FILA que contenga el BIN buscado en el texto
+        console.log(`⏳ Esperando fila con BIN ${bin}...`);
         try {
-            await page.waitForFunction(() => {
-                // Buscar cualquier elemento que contenga un número de 16 dígitos (tarjeta)
-                const bodyText = document.body.innerText;
-                return /\d{16}/.test(bodyText);
-            }, { timeout: 30000 });
-            console.log('✅ Se detectaron números de tarjeta en la página');
+            await page.waitForFunction((searchBin) => {
+                const rows = document.querySelectorAll('table tbody tr');
+                for (const row of rows) {
+                    if (row.innerText.includes(searchBin)) return true;
+                }
+                return false;
+            }, { timeout: 30000 }, bin);
+            console.log('✅ Fila con el BIN encontrada');
         } catch (e) {
-            console.log('⚠️ No se detectaron números de tarjeta después de 30 segundos');
+            console.log('⚠️ No se encontró ninguna fila con ese BIN. Puede que no haya resultados.');
         }
 
-        // Espera adicional para renderizado completo
-        await new Promise(r => setTimeout(r, 5000));
+        // Pequeña espera adicional para renderizado
+        await new Promise(r => setTimeout(r, 3000));
 
-        // ========== EXTRACCIÓN DE DATOS (VERSIÓN ANTIGUA QUE SÍ FUNCIONA) ==========
+        // ========== EXTRACCIÓN (MÉTODOS QUE FUNCIONABAN ANTES) ==========
         let allTexts = [];
 
-        // Método 1: texto visible
+        // Método 1: texto visible completo
         const visibleText = await page.evaluate(() => document.body.innerText);
         allTexts.push(visibleText);
         console.log(`🔍 Texto visible (primeros 500 chars):\n${visibleText.substring(0, 500)}`);
@@ -148,7 +148,7 @@ async function doPuppeteerSearch(bin) {
         const fullHtml = await page.evaluate(() => document.body.outerHTML);
         allTexts.push(fullHtml);
 
-        // Método 3: simular Ctrl+A + Ctrl+C (clipboard)
+        // Método 3: SIMULAR CTRL+A + CTRL+C (el que funcionaba antes)
         const copiedText = await page.evaluate(async () => {
             const body = document.body;
             const range = document.createRange();
@@ -174,7 +174,7 @@ async function doPuppeteerSearch(bin) {
         const combinedText = allTexts.join('\n');
         const cleanedText = combinedText.replace(/[\u200B\u200C\u200D\uFEFF]/g, '');
 
-        // Patrón robusto (exactamente el que funcionaba antes)
+        // Patrones de extracción (los mismos que usabas)
         const cardPattern = /(\d{16})\D*(\d{2})\D*(\d{4})\D*(\d{3})/g;
         let tarjetas = new Set();
         let match;
@@ -182,7 +182,7 @@ async function doPuppeteerSearch(bin) {
             tarjetas.add(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
         }
 
-        // Fallback con separadores explícitos
+        // Fallback con separadores
         if (tarjetas.size === 0) {
             const pattern2 = /(\d{16})\s*[|\-\s]\s*(\d{2})\s*[|\-\s]\s*(\d{4})\s*[|\-\s]\s*(\d{3})/g;
             while ((match = pattern2.exec(cleanedText)) !== null) {
@@ -193,11 +193,16 @@ async function doPuppeteerSearch(bin) {
         const resultados = Array.from(tarjetas);
         console.log(`✅ Resultado final: ${resultados.length} tarjetas completas encontradas.`);
 
+        // Si no se encontraron tarjetas pero se encontró la fila del BIN, el problema es la ofuscación
+        if (resultados.length === 0 && visibleText.includes(bin)) {
+            console.log('⚠️ Se encontró el BIN pero no se pudieron extraer tarjetas. Revisa el preview del texto copiado.');
+        }
+
         return {
             success: true,
             count: resultados.length,
             data: resultados,
-            debug_preview: visibleText.substring(0, 500)
+            debug_preview: copiedText.substring(0, 1000) || visibleText.substring(0, 1000)
         };
     } catch (error) {
         console.error('❌ Error:', error.message);
