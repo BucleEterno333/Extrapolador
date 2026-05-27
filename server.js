@@ -1,5 +1,5 @@
 // ==========================================
-// SERVER.JS - VERSIÓN ADAPTADA A LA NUEVA WEB (con login robusto y extracción mejorada)
+// SERVER.JS - VERSIÓN CORREGIDA (sin waitForTimeout)
 // ==========================================
 
 console.log('🎯 ===== INICIANDO SERVER.JS =====');
@@ -32,8 +32,9 @@ try {
 }
 
 // Cargar módulos con manejo de errores
+let express, cors, puppeteer;
 try {
-    require('express');
+    express = require('express');
     console.log('✅ Express cargado correctamente');
 } catch (error) {
     console.log('❌ Error cargando express:', error.message);
@@ -41,15 +42,19 @@ try {
 }
 
 try {
-    require('cors');
+    cors = require('cors');
     console.log('✅ CORS cargado correctamente');
 } catch (error) {
     console.log('❌ Error cargando cors:', error.message);
 }
 
-const express = require('express');
-const cors = require('cors');
-const puppeteer = require('puppeteer');
+try {
+    puppeteer = require('puppeteer');
+    console.log('✅ Puppeteer cargado correctamente');
+} catch (error) {
+    console.log('❌ Error cargando puppeteer:', error.message);
+    process.exit(1);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -59,10 +64,10 @@ console.log('✅ Todos los módulos cargados - Iniciando servidor Express...');
 // Configuración CORS actualizada
 app.use(cors({
     origin: [
-        'https://astralchk.com',
+        'https://ciber7erroristaschk.com',
         'http://localhost:3000',
         'http://127.0.0.1:5500',
-        'https://p01--extrapolador--7ppzd7xy487n.code.run'
+        'https://p01--extrapolador-backend--zzznpgbh8lh8.code.run'
     ],
     methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
@@ -107,7 +112,7 @@ app.get('/', (req, res) => {
     });
 });
 
-// Función para encontrar el ejecutable del navegador (Northflank)
+// Función para encontrar el ejecutable del navegador
 async function findBrowser() {
     console.log('🔍 Buscando navegador...');
     const envPath = process.env.PUPPETEER_EXECUTABLE_PATH;
@@ -239,7 +244,7 @@ async function doPuppeteerSearch(bin) {
         await page.setDefaultNavigationTimeout(30000);
         await page.setDefaultTimeout(30000);
 
-        // --- LOGIN ROBUSTO (adaptado a la nueva estructura HTML) ---
+        // --- LOGIN ROBUSTO ---
         const chkUrl = process.env.CHK_URL;
         console.log('🌐 Navegando a:', chkUrl);
         await page.goto(chkUrl, { waitUntil: 'networkidle2', timeout: 30000 });
@@ -251,7 +256,7 @@ async function doPuppeteerSearch(bin) {
             'input[type="email"]',
             'input[name="email"]',
             'input[placeholder*="user@domain.com"]',
-            'input[class*="field-input"]',  // clase genérica del nuevo diseño
+            'input[class*="field-input"]',
             'input[placeholder*="email" i]',
             'input[placeholder*="correo" i]'
         ];
@@ -284,7 +289,7 @@ async function doPuppeteerSearch(bin) {
         if (!passwordField) throw new Error('No se encontró el campo de password');
 
         // Limpiar y escribir credenciales
-        await emailField.click({ clickCount: 3 }); // seleccionar todo
+        await emailField.click({ clickCount: 3 });
         await emailField.type(process.env.CHK_EMAIL, { delay: 30 });
         await passwordField.click({ clickCount: 3 });
         await passwordField.type(process.env.CHK_PASSWORD, { delay: 30 });
@@ -315,11 +320,11 @@ async function doPuppeteerSearch(bin) {
         ]);
 
         console.log('✅ Login completado, esperando carga de la interfaz principal...');
-        await page.waitForTimeout(5000); // espera adicional para que cargue el dashboard
+        // Reemplazo de waitForTimeout
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
         // --- BÚSQUEDA DEL BIN ---
         console.log(`🎯 Buscando BIN: ${bin}`);
-        // Selector actualizado al placeholder en inglés (común en la nueva web)
         const searchSelectors = [
             'input[placeholder="Search by 6-digit BIN..."]',
             'input[placeholder="Buscar por BIN de 6 dígitos..."]',
@@ -340,13 +345,13 @@ async function doPuppeteerSearch(bin) {
         await searchInput.click({ clickCount: 3 });
         await searchInput.type(bin, { delay: 100 });
 
-        // Simular presión de Enter o buscar botón de búsqueda
+        // Buscar botón de búsqueda o presionar Enter
         const searchButtonSelectors = [
             'button[aria-label="Search"]',
             'button:has-text("Search")',
             'button:has-text("Buscar")',
-            'i.fa-search',  // posible icono
-            'button[type="submit"]:not([form])' // a veces el mismo botón del login pero en otro contexto
+            'i.fa-search',
+            'button[type="submit"]:not([form])'
         ];
         let searchBtn = null;
         for (const sel of searchButtonSelectors) {
@@ -363,24 +368,23 @@ async function doPuppeteerSearch(bin) {
                 page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => console.log('⚠️ No hubo navegación tras búsqueda (puede ser SPA)'))
             ]);
         } else {
-            // Si no hay botón, presionar Enter
             console.log('⚠️ No se encontró botón de búsqueda, se presionará Enter');
             await searchInput.press('Enter');
-            await page.waitForTimeout(5000);
+            await new Promise(resolve => setTimeout(resolve, 5000));
         }
 
         // Esperar a que desaparezca un loader o aparezcan resultados
         console.log('⏳ Esperando resultados...');
         await page.waitForFunction(() => {
             const loader = document.querySelector('.loader, .spinner, .loading');
-            if (loader && loader.offsetParent !== null) return false; // todavía hay loader visible
+            if (loader && loader.offsetParent !== null) return false;
             const hasResults = document.body.innerText.includes('card') || 
                                document.body.innerText.includes('tarjeta') ||
                                document.querySelector('table tbody tr') !== null;
             return hasResults;
         }, { timeout: 30000 }).catch(() => console.log('⚠️ Timeout esperando resultados, continuando de todos modos'));
 
-        await page.waitForTimeout(3000); // pausa extra para estabilidad
+        await new Promise(resolve => setTimeout(resolve, 3000));
 
         // --- EXTRACCIÓN MEJORADA DE TARJETAS ---
         let allTexts = [];
@@ -417,7 +421,7 @@ async function doPuppeteerSearch(bin) {
             console.log(`🔍 Texto copiado (primeros 500 chars):\n${copiedText.substring(0, 500)}`);
         }
 
-        // Método 4: extraer específicamente celdas de tablas (muy común en paneles de resultados)
+        // Método 4: extraer específicamente celdas de tablas
         const tableData = await page.evaluate(() => {
             const rows = Array.from(document.querySelectorAll('table tbody tr, .card-row, .result-item'));
             return rows.map(row => row.innerText).join('\n');
@@ -427,7 +431,7 @@ async function doPuppeteerSearch(bin) {
             console.log(`🔍 Datos de tablas extraídos: ${tableData.length} caracteres`);
         }
 
-        // Método 5: buscar elementos con números de tarjeta (patrón de 16 dígitos)
+        // Método 5: buscar elementos con números de tarjeta
         const cardElements = await page.evaluate(() => {
             const regex = /\b\d{16}\b/g;
             const elements = Array.from(document.querySelectorAll('*'));
@@ -447,17 +451,17 @@ async function doPuppeteerSearch(bin) {
         const combinedText = allTexts.join('\n');
         const cleanedText = combinedText.replace(/[\u200B\u200C\u200D\uFEFF]/g, '');
 
-        // Patrón principal: 16 dígitos, luego separadores no dígitos, luego 2 dígitos (mes), luego 2 o 4 dígitos (año), luego 3 dígitos (CVV)
+        // Patrón principal: 16 dígitos, luego separadores, luego mes, año, CVV
         const cardPattern = /(\d{16})\D*(\d{2})\D*(\d{2,4})\D*(\d{3})/g;
         let tarjetas = new Set();
         let match;
         while ((match = cardPattern.exec(cleanedText)) !== null) {
             let year = match[3];
-            if (year.length === 2) year = '20' + year; // asumir 2000+
+            if (year.length === 2) year = '20' + year;
             tarjetas.add(`${match[1]}|${match[2]}|${year}|${match[4]}`);
         }
 
-        // Patrón alternativo con espacios o guiones: 1234 5678 9012 3456 | MM | YY | CVV
+        // Patrón alternativo con espacios o guiones
         const pattern2 = /(\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4})\D*(\d{2})\D*(\d{2,4})\D*(\d{3})/g;
         while ((match = pattern2.exec(cleanedText)) !== null) {
             let cardNumber = match[1].replace(/[-\s]/g, '');
@@ -466,7 +470,7 @@ async function doPuppeteerSearch(bin) {
             tarjetas.add(`${cardNumber}|${match[2]}|${year}|${match[4]}`);
         }
 
-        // Si no se encontraron tarjetas, intentar con patrón más flexible (solo números)
+        // Patrón de solo números
         if (tarjetas.size === 0) {
             const pattern3 = /(\d{16})\D+(\d{2})\D+(\d{4})\D+(\d{3})/g;
             while ((match = pattern3.exec(cleanedText)) !== null) {
@@ -484,7 +488,7 @@ async function doPuppeteerSearch(bin) {
             success: true,
             count: resultados.length,
             data: resultados,
-            debug_text_preview: visibleText.substring(0, 1000) // para depuración
+            debug_text_preview: visibleText.substring(0, 1000)
         };
     } catch (error) {
         console.error('❌ Error en Puppeteer:', error.message);
