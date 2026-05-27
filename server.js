@@ -59,10 +59,10 @@ console.log('✅ Todos los módulos cargados - Iniciando servidor Express...');
 // Configuración CORS actualizada
 app.use(cors({
     origin: [
-        'https://ciber7erroristaschk.com',
+        'https://astralchk.com',
         'http://localhost:3000',
         'http://127.0.0.1:5500',
-        'https://p01--extrapolador-backend--zzznpgbh8lh8.code.run'
+        'https://p01--extrapolador--7ppzd7xy487n.code.run'
     ],
     methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
