@@ -308,60 +308,71 @@ async function doPuppeteerSearch(bin) {
         }
         await new Promise(resolve => setTimeout(resolve, 5000));
 
-        // EXTRACCIÓN
-        const visibleText = await page.evaluate(() => document.body.innerText);
-        console.log(`🔍 Texto visible (primeros 500 chars):\n${visibleText.substring(0, 500)}`);
 
-        if (!visibleText.includes(bin)) {
-            console.log(`⚠️ ADVERTENCIA: El BIN ${bin} no aparece en el texto visible. La búsqueda probablemente falló.`);
+        // ========== EXTRACCIÓN DE DATOS ==========
+        let allTexts = [];
+
+        // Método 1: texto visible
+        const visibleText = await page.evaluate(() => document.body.innerText);
+        allTexts.push(visibleText);
+        console.log(`🔍 Texto visible obtenido (primeros 500 chars):\n${visibleText.substring(0, 500)}`);
+
+        // Método 2: HTML completo
+        const fullHtml = await page.evaluate(() => document.body.outerHTML);
+        allTexts.push(fullHtml);
+        console.log(`🔍 HTML (primeros 500 chars):\n${fullHtml.substring(0, 500)}`);
+
+        // Método 3: simular Ctrl+A + Ctrl+C
+        const copiedText = await page.evaluate(async () => {
+            const body = document.body;
+            const range = document.createRange();
+            range.selectNodeContents(body);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            try {
+                await navigator.clipboard.writeText(selection.toString());
+                return selection.toString();
+            } catch (err) {
+                return selection.toString();
+            }
+        }).catch(err => {
+            console.log('⚠️ Error en clipboard:', err.message);
+            return '';
+        });
+        if (copiedText) {
+            allTexts.push(copiedText);
+            console.log(`🔍 Texto copiado (primeros 500 chars):\n${copiedText.substring(0, 500)}`);
         } else {
-            console.log(`✅ BIN ${bin} encontrado en el texto.`);
+            console.log('⚠️ No se pudo obtener texto copiado.');
         }
 
-        const fullHtml = await page.evaluate(() => document.body.outerHTML);
-        const tableData = await page.evaluate(() => {
-            const rows = Array.from(document.querySelectorAll('table tbody tr, .card-row, .result-item'));
-            return rows.map(r => r.innerText).join('\n');
-        });
-        const cardAttributes = await page.evaluate(() => {
-            const cards = [];
-            document.querySelectorAll('[data-card], [data-cc], [data-number]').forEach(el => {
-                cards.push(el.innerText || el.getAttribute('data-card') || el.getAttribute('data-cc'));
-            });
-            return cards.join('\n');
-        });
+        const combinedText = allTexts.join('\n');
+        const cleanedText = combinedText.replace(/[\u200B\u200C\u200D\uFEFF]/g, '');
 
-        const combinedText = [visibleText, fullHtml, tableData, cardAttributes].join('\n');
-        const cleanedText = combinedText.replace(/[\u200B-\u200D\uFEFF]/g, '');
-
-        const cardPattern = /(\d{16})\D*(\d{2})\D*(\d{2,4})\D*(\d{3})/g;
+        // Extraer tarjetas con patrón robusto
+        const cardPattern = /(\d{16})\D*(\d{2})\D*(\d{4})\D*(\d{3})/g;
         let tarjetas = new Set();
         let match;
         while ((match = cardPattern.exec(cleanedText)) !== null) {
-            let year = match[3].length === 2 ? '20' + match[3] : match[3];
-            tarjetas.add(`${match[1]}|${match[2]}|${year}|${match[4]}`);
-        }
-
-        const pattern2 = /(\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4})\D*(\d{2})\D*(\d{2,4})\D*(\d{3})/g;
-        while ((match = pattern2.exec(cleanedText)) !== null) {
-            let cardNumber = match[1].replace(/[-\s]/g, '');
-            let year = match[3].length === 2 ? '20' + match[3] : match[3];
-            tarjetas.add(`${cardNumber}|${match[2]}|${year}|${match[4]}`);
-        }
-
-        const pattern3 = /(\d{16})\s+(\d{2})\s+(\d{4})\s+(\d{3})/g;
-        while ((match = pattern3.exec(cleanedText)) !== null) {
             tarjetas.add(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
         }
 
+        // Fallback con separadores explícitos
+        if (tarjetas.size === 0) {
+            const pattern2 = /(\d{16})\s*[|\-\s]\s*(\d{2})\s*[|\-\s]\s*(\d{4})\s*[|\-\s]\s*(\d{3})/g;
+            while ((match = pattern2.exec(cleanedText)) !== null) {
+                tarjetas.add(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
+            }
+        }
+
         const resultados = Array.from(tarjetas);
-        console.log(`✅ Resultado final: ${resultados.length} tarjetas encontradas.`);
+        console.log(`✅ Resultado final: ${resultados.length} tarjetas completas encontradas.`);
 
         return {
             success: true,
             count: resultados.length,
-            data: resultados,
-            debug_text_preview: visibleText.substring(0, 1000)
+            data: resultados
         };
     } catch (error) {
         console.error('❌ Error en Puppeteer:', error.message);
