@@ -1,5 +1,5 @@
 // ==========================================
-// SERVER.JS - VERSIÓN CON SELECCIÓN Y COPIADO SIMULADO
+// SERVER.JS - VERSIÓN CON CLIC FUERA DEL INPUT
 // ==========================================
 
 console.log('🎯 ===== INICIANDO SERVER.JS =====');
@@ -13,6 +13,7 @@ const puppeteer = require('puppeteer');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// CORS actualizado
 app.use(cors({
     origin: [
         'https://astralchk.com',
@@ -64,7 +65,7 @@ async function doPuppeteerSearch(bin) {
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 });
         console.log('✅ Login completado');
 
-        // Esperar 20 segundos después del login (como pide el usuario)
+        // Espera 20 segundos después del login
         console.log('⏳ Esperando 20 segundos después del login...');
         await new Promise(r => setTimeout(r, 20000));
 
@@ -75,46 +76,47 @@ async function doPuppeteerSearch(bin) {
         await searchInput.click({ clickCount: 3 });
         await searchInput.type(bin, { delay: 100 });
 
-        // Esperar otros 20 segundos después de escribir el BIN
+        // Espera 20 segundos para que carguen los resultados
         console.log('⏳ Esperando 20 segundos para que carguen los resultados...');
         await new Promise(r => setTimeout(r, 20000));
 
-        // === SELECCIONAR TODO Y OBTENER EL TEXTO SELECCIONADO ===
-        console.log('📋 Seleccionando todo el contenido...');
-        // Seleccionar todo (Ctrl+A)
+        // === QUITAR EL FOCO DEL INPUT (clic fuera) ===
+        console.log('🖱️ Haciendo clic fuera del input para quitar el foco...');
+        await page.click('body'); // Clic en el fondo de la página
+
+        // Pequeña pausa para asegurar que el foco cambió
+        await new Promise(r => setTimeout(r, 500));
+
+        // === SELECCIONAR TODO (Ctrl+A) y obtener el texto seleccionado ===
+        console.log('📋 Seleccionando todo el contenido de la página...');
         await page.keyboard.down('Control');
         await page.keyboard.press('a');
         await page.keyboard.up('Control');
 
-        // Obtener el texto seleccionado directamente (sin clipboard)
+        // Obtener el texto seleccionado actualmente (no el clipboard, para evitar permisos)
         const selectedText = await page.evaluate(() => {
             const selection = window.getSelection();
             return selection ? selection.toString() : '';
         });
 
         if (!selectedText) {
-            // Fallback: obtener todo el texto del body
-            const bodyText = await page.evaluate(() => document.body.innerText);
-            console.log('⚠️ No se pudo obtener texto seleccionado, usando body.innerText');
-            console.log(`🔍 Body text (primeros 500 chars):\n${bodyText.substring(0, 500)}`);
-        } else {
-            console.log(`🔍 Texto seleccionado (primeros 500 chars):\n${selectedText.substring(0, 500)}`);
+            throw new Error('No se pudo obtener el texto seleccionado');
         }
 
-        const textToProcess = selectedText || (await page.evaluate(() => document.body.innerText));
+        console.log(`🔍 Texto seleccionado (primeros 500 chars):\n${selectedText.substring(0, 500)}`);
 
         // === EXTRACCIÓN DE TARJETAS ===
         const cardPattern = /(\d{16})\D*(\d{2})\D*(\d{4})\D*(\d{3})/g;
         let tarjetas = new Set();
         let match;
-        while ((match = cardPattern.exec(textToProcess)) !== null) {
+        while ((match = cardPattern.exec(selectedText)) !== null) {
             tarjetas.add(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
         }
 
         // Fallback con separadores
         if (tarjetas.size === 0) {
             const pattern2 = /(\d{16})\s*[|\-\s]\s*(\d{2})\s*[|\-\s]\s*(\d{4})\s*[|\-\s]\s*(\d{3})/g;
-            while ((match = pattern2.exec(textToProcess)) !== null) {
+            while ((match = pattern2.exec(selectedText)) !== null) {
                 tarjetas.add(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
             }
         }
@@ -126,7 +128,7 @@ async function doPuppeteerSearch(bin) {
             success: true,
             count: resultados.length,
             data: resultados,
-            debug_preview: textToProcess.substring(0, 1000)
+            debug_preview: selectedText.substring(0, 1000)
         };
     } catch (error) {
         console.error('❌ Error en Puppeteer:', error.message);
@@ -136,6 +138,7 @@ async function doPuppeteerSearch(bin) {
     }
 }
 
+// Ruta de búsqueda
 app.post('/api/search-bin', async (req, res) => {
     const { bin } = req.body;
     if (!bin || bin.length !== 6) {
@@ -150,6 +153,7 @@ app.post('/api/search-bin', async (req, res) => {
     }
 });
 
+// Ruta de prueba
 app.get('/api/test-puppeteer', async (req, res) => {
     let browser;
     try {
