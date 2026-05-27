@@ -69,12 +69,60 @@ async function doPuppeteerSearch(bin) {
         console.log('⏳ Esperando 20 segundos después del login...');
         await new Promise(r => setTimeout(r, 30000));
 
-        // === BÚSQUEDA DEL BIN ===
+        // === BÚSQUEDA DEL BIN (VERSIÓN ROBUSTA) ===
         console.log(`🎯 Buscando BIN: ${bin}`);
+
+        // Esperar el campo de búsqueda
         await page.waitForSelector('input[placeholder="Search by 6-digit BIN..."]', { timeout: 10000 });
         const searchInput = await page.$('input[placeholder="Search by 6-digit BIN..."]');
+
+        // Limpiar campo por si tiene texto previo
         await searchInput.click({ clickCount: 3 });
+        await searchInput.press('Backspace');
+        await searchInput.press('Backspace');
+        await searchInput.press('Backspace');
+        await searchInput.press('Backspace');
+        await searchInput.press('Backspace');
+        await searchInput.press('Backspace');
+
+        // Escribir el BIN
         await searchInput.type(bin, { delay: 100 });
+
+        // Verificar que el valor se haya escrito correctamente
+        const valorActual = await page.evaluate(el => el.value, searchInput);
+        if (valorActual !== bin) {
+            console.log(`⚠️ Valor escrito no coincide: ${valorActual} vs ${bin}, reintentando...`);
+            await searchInput.evaluate((el, val) => { el.value = val; }, bin);
+        }
+
+        // Disparar eventos para que la web detecte el cambio
+        await page.evaluate(() => {
+            const input = document.querySelector('input[placeholder="Search by 6-digit BIN..."]');
+            if (input) {
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+                input.dispatchEvent(new Event('blur', { bubbles: true }));
+            }
+        });
+
+        // Forzar la búsqueda programáticamente (por si acaso)
+        await page.evaluate((binBuscado) => {
+            // Intenta encontrar cualquier función de búsqueda global (si existe)
+            if (window.searchCards) window.searchCards(binBuscado);
+            if (window.filterCards) window.filterCards(binBuscado);
+            // También simula presionar Enter nuevamente sobre el input
+            const input = document.querySelector('input[placeholder="Search by 6-digit BIN..."]');
+            if (input) {
+                const enterEvent = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true });
+                input.dispatchEvent(enterEvent);
+            }
+        }, bin);
+
+        // Pequeña pausa para que los eventos surtan efecto
+        await new Promise(r => setTimeout(r, 500));
+
+        console.log(`✅ BIN ${bin} escrito y eventos disparados`);
 
         // Espera 20 segundos para que carguen los resultados
         console.log('⏳ Esperando 20 segundos para que carguen los resultados...');
