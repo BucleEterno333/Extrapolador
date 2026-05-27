@@ -67,7 +67,7 @@ async function doPuppeteerSearch(bin) {
 
         // Espera 20 segundos después del login
         console.log('⏳ Esperando 20 segundos después del login...');
-        await new Promise(r => setTimeout(r, 20000));
+        await new Promise(r => setTimeout(r, 30000));
 
         // === BÚSQUEDA DEL BIN ===
         console.log(`🎯 Buscando BIN: ${bin}`);
@@ -78,7 +78,7 @@ async function doPuppeteerSearch(bin) {
 
         // Espera 20 segundos para que carguen los resultados
         console.log('⏳ Esperando 20 segundos para que carguen los resultados...');
-        await new Promise(r => setTimeout(r, 20000));
+        await new Promise(r => setTimeout(r, 30000));
 
         // === QUITAR EL FOCO DEL INPUT (clic fuera) ===
         console.log('🖱️ Haciendo clic fuera del input para quitar el foco...');
