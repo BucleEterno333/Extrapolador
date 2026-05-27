@@ -1,5 +1,5 @@
 // ==========================================
-// SERVER.JS - VERSIÓN CORREGIDA (sin waitForTimeout)
+// SERVER.JS - VERSIÓN CORREGIDA (sin selectores :has-text)
 // ==========================================
 
 console.log('🎯 ===== INICIANDO SERVER.JS =====');
@@ -61,7 +61,7 @@ const PORT = process.env.PORT || 3000;
 
 console.log('✅ Todos los módulos cargados - Iniciando servidor Express...');
 
-// Configuración CORS actualizada
+// Configuración CORS actualizada con los nuevos dominios
 app.use(cors({
     origin: [
         'https://astralchk.com',
@@ -139,7 +139,14 @@ async function findBrowser() {
     return undefined;
 }
 
-// Función principal de scraping con login robusto y extracción mejorada
+// Función auxiliar para buscar botón por texto usando XPath
+async function findButtonByText(page, text) {
+    const xpath = `//button[contains(text(), '${text}')]`;
+    const [button] = await page.$x(xpath);
+    return button;
+}
+
+// Función principal de scraping
 async function doPuppeteerSearch(bin) {
     let browser;
     try {
@@ -244,14 +251,14 @@ async function doPuppeteerSearch(bin) {
         await page.setDefaultNavigationTimeout(30000);
         await page.setDefaultTimeout(30000);
 
-        // --- LOGIN ROBUSTO ---
+        // --- LOGIN ---
         const chkUrl = process.env.CHK_URL;
         console.log('🌐 Navegando a:', chkUrl);
         await page.goto(chkUrl, { waitUntil: 'networkidle2', timeout: 30000 });
 
         console.log('🔑 Iniciando sesión...');
 
-        // Múltiples selectores para campo email
+        // Campo email
         const emailSelectors = [
             'input[type="email"]',
             'input[name="email"]',
@@ -270,7 +277,7 @@ async function doPuppeteerSearch(bin) {
         }
         if (!emailField) throw new Error('No se encontró el campo de email');
 
-        // Múltiples selectores para campo password
+        // Campo password
         const passwordSelectors = [
             'input[type="password"]',
             'input[name="password"]',
@@ -288,39 +295,28 @@ async function doPuppeteerSearch(bin) {
         }
         if (!passwordField) throw new Error('No se encontró el campo de password');
 
-        // Limpiar y escribir credenciales
         await emailField.click({ clickCount: 3 });
         await emailField.type(process.env.CHK_EMAIL, { delay: 30 });
         await passwordField.click({ clickCount: 3 });
         await passwordField.type(process.env.CHK_PASSWORD, { delay: 30 });
 
-        // Selectores para el botón de submit
-        const submitSelectors = [
-            'button[type="submit"]',
-            'button.submit-btn',
-            'button:has-text("Login")',
-            'button:has-text("Sign in")',
-            'button:has-text("Iniciar sesión")',
-            'input[type="submit"]'
-        ];
-        let submitBtn = null;
-        for (const sel of submitSelectors) {
-            submitBtn = await page.$(sel);
-            if (submitBtn) {
-                console.log(`✅ Botón submit encontrado con selector: ${sel}`);
-                break;
-            }
-        }
+        // Botón de submit - usando selectores estándar y XPath como respaldo
+        let submitBtn = await page.$('button[type="submit"]');
+        if (!submitBtn) submitBtn = await page.$('button.submit-btn');
+        if (!submitBtn) submitBtn = await page.$('input[type="submit"]');
+        if (!submitBtn) submitBtn = await findButtonByText(page, 'Login');
+        if (!submitBtn) submitBtn = await findButtonByText(page, 'Sign in');
+        if (!submitBtn) submitBtn = await findButtonByText(page, 'Iniciar sesión');
+        
         if (!submitBtn) throw new Error('No se encontró el botón de submit');
 
-        // Hacer clic y esperar navegación
+        console.log('✅ Botón submit encontrado');
         await Promise.all([
             submitBtn.click(),
             page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 })
         ]);
 
-        console.log('✅ Login completado, esperando carga de la interfaz principal...');
-        // Reemplazo de waitForTimeout
+        console.log('✅ Login completado, esperando carga...');
         await new Promise(resolve => setTimeout(resolve, 5000));
 
         // --- BÚSQUEDA DEL BIN ---
@@ -345,35 +341,28 @@ async function doPuppeteerSearch(bin) {
         await searchInput.click({ clickCount: 3 });
         await searchInput.type(bin, { delay: 100 });
 
-        // Buscar botón de búsqueda o presionar Enter
-        const searchButtonSelectors = [
-            'button[aria-label="Search"]',
-            'button:has-text("Search")',
-            'button:has-text("Buscar")',
-            'i.fa-search',
-            'button[type="submit"]:not([form])'
-        ];
-        let searchBtn = null;
-        for (const sel of searchButtonSelectors) {
-            searchBtn = await page.$(sel);
-            if (searchBtn) {
-                console.log(`✅ Botón de búsqueda encontrado con selector: ${sel}`);
-                break;
-            }
-        }
+        // Buscar botón de búsqueda (solo selectores CSS válidos)
+        let searchBtn = await page.$('button[aria-label="Search"]');
+        if (!searchBtn) searchBtn = await page.$('button[aria-label="Buscar"]');
+        if (!searchBtn) searchBtn = await page.$('i.fa-search');
+        if (!searchBtn) searchBtn = await page.$('button[type="submit"]:not([form])');
+        // Intentar por texto usando XPath
+        if (!searchBtn) searchBtn = await findButtonByText(page, 'Search');
+        if (!searchBtn) searchBtn = await findButtonByText(page, 'Buscar');
 
         if (searchBtn) {
+            console.log('✅ Botón de búsqueda encontrado, haciendo clic...');
             await Promise.all([
                 searchBtn.click(),
-                page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => console.log('⚠️ No hubo navegación tras búsqueda (puede ser SPA)'))
+                page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => console.log('⚠️ No hubo navegación (SPA)'))
             ]);
         } else {
-            console.log('⚠️ No se encontró botón de búsqueda, se presionará Enter');
+            console.log('⚠️ No se encontró botón de búsqueda, presionando Enter');
             await searchInput.press('Enter');
             await new Promise(resolve => setTimeout(resolve, 5000));
         }
 
-        // Esperar a que desaparezca un loader o aparezcan resultados
+        // Esperar resultados
         console.log('⏳ Esperando resultados...');
         await page.waitForFunction(() => {
             const loader = document.querySelector('.loader, .spinner, .loading');
@@ -382,23 +371,20 @@ async function doPuppeteerSearch(bin) {
                                document.body.innerText.includes('tarjeta') ||
                                document.querySelector('table tbody tr') !== null;
             return hasResults;
-        }, { timeout: 30000 }).catch(() => console.log('⚠️ Timeout esperando resultados, continuando de todos modos'));
+        }, { timeout: 30000 }).catch(() => console.log('⚠️ Timeout esperando resultados, continuando...'));
 
         await new Promise(resolve => setTimeout(resolve, 3000));
 
-        // --- EXTRACCIÓN MEJORADA DE TARJETAS ---
+        // --- EXTRACCIÓN DE TARJETAS ---
         let allTexts = [];
 
-        // Método 1: texto visible completo
         const visibleText = await page.evaluate(() => document.body.innerText);
         allTexts.push(visibleText);
         console.log(`🔍 Texto visible (primeros 500 chars):\n${visibleText.substring(0, 500)}`);
 
-        // Método 2: HTML completo
         const fullHtml = await page.evaluate(() => document.body.outerHTML);
         allTexts.push(fullHtml);
 
-        // Método 3: simular Ctrl+A + Ctrl+C
         const copiedText = await page.evaluate(async () => {
             const body = document.body;
             const range = document.createRange();
@@ -421,7 +407,6 @@ async function doPuppeteerSearch(bin) {
             console.log(`🔍 Texto copiado (primeros 500 chars):\n${copiedText.substring(0, 500)}`);
         }
 
-        // Método 4: extraer específicamente celdas de tablas
         const tableData = await page.evaluate(() => {
             const rows = Array.from(document.querySelectorAll('table tbody tr, .card-row, .result-item'));
             return rows.map(row => row.innerText).join('\n');
@@ -431,7 +416,6 @@ async function doPuppeteerSearch(bin) {
             console.log(`🔍 Datos de tablas extraídos: ${tableData.length} caracteres`);
         }
 
-        // Método 5: buscar elementos con números de tarjeta
         const cardElements = await page.evaluate(() => {
             const regex = /\b\d{16}\b/g;
             const elements = Array.from(document.querySelectorAll('*'));
@@ -451,7 +435,6 @@ async function doPuppeteerSearch(bin) {
         const combinedText = allTexts.join('\n');
         const cleanedText = combinedText.replace(/[\u200B\u200C\u200D\uFEFF]/g, '');
 
-        // Patrón principal: 16 dígitos, luego separadores, luego mes, año, CVV
         const cardPattern = /(\d{16})\D*(\d{2})\D*(\d{2,4})\D*(\d{3})/g;
         let tarjetas = new Set();
         let match;
@@ -461,7 +444,6 @@ async function doPuppeteerSearch(bin) {
             tarjetas.add(`${match[1]}|${match[2]}|${year}|${match[4]}`);
         }
 
-        // Patrón alternativo con espacios o guiones
         const pattern2 = /(\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4})\D*(\d{2})\D*(\d{2,4})\D*(\d{3})/g;
         while ((match = pattern2.exec(cleanedText)) !== null) {
             let cardNumber = match[1].replace(/[-\s]/g, '');
@@ -470,7 +452,6 @@ async function doPuppeteerSearch(bin) {
             tarjetas.add(`${cardNumber}|${match[2]}|${year}|${match[4]}`);
         }
 
-        // Patrón de solo números
         if (tarjetas.size === 0) {
             const pattern3 = /(\d{16})\D+(\d{2})\D+(\d{4})\D+(\d{3})/g;
             while ((match = pattern3.exec(cleanedText)) !== null) {
@@ -481,7 +462,7 @@ async function doPuppeteerSearch(bin) {
         const resultados = Array.from(tarjetas);
         console.log(`✅ Resultado final: ${resultados.length} tarjetas completas encontradas.`);
         if (resultados.length === 0) {
-            console.log('⚠️ No se extrajo ninguna tarjeta. Revisar logs de texto extraído.');
+            console.log('⚠️ No se extrajo ninguna tarjeta. Revisar debug_text_preview.');
         }
 
         return {
@@ -515,7 +496,7 @@ app.post('/api/search-bin', async (req, res) => {
     }
 });
 
-// Ruta de prueba de Puppeteer
+// Ruta de prueba
 app.get('/api/test-puppeteer', async (req, res) => {
     console.log('🧪 Probando Puppeteer...');
     let browser;
