@@ -1,5 +1,5 @@
 // ==========================================
-// SERVER.JS - VERSIÓN FINAL (funcional para shadowchk)
+// SERVER.JS - VERSIÓN SIN $x (FUNCIONAL 100%)
 // ==========================================
 
 console.log('🎯 ===== INICIANDO SERVER.JS =====');
@@ -31,7 +31,6 @@ try {
     console.log('❌ Error en verificación inicial:', error.message);
 }
 
-// Cargar módulos
 let express, cors, puppeteer;
 try {
     express = require('express');
@@ -61,7 +60,7 @@ const PORT = process.env.PORT || 3000;
 
 console.log('✅ Todos los módulos cargados - Iniciando servidor Express...');
 
-// ========== CORS ACTUALIZADO ==========
+// CORS actualizado
 app.use(cors({
     origin: [
         'https://astralchk.com',
@@ -76,7 +75,6 @@ app.use(cors({
 
 app.use(express.json());
 
-// ========== ENDPOINTS DE SALUD ==========
 app.get('/health', (req, res) => {
     res.status(200).json({ 
         status: 'OK', 
@@ -112,7 +110,6 @@ app.get('/', (req, res) => {
     });
 });
 
-// ========== FUNCIÓN PARA ENCONTRAR EL NAVEGADOR ==========
 async function findBrowser() {
     console.log('🔍 Buscando navegador...');
     const envPath = process.env.PUPPETEER_EXECUTABLE_PATH;
@@ -138,7 +135,26 @@ async function findBrowser() {
     return undefined;
 }
 
-// ========== FUNCIÓN PRINCIPAL DE SCRAPING ==========
+// Función para encontrar un botón por texto usando evaluate (sin $x)
+async function findButtonByText(page, text) {
+    const button = await page.evaluate((searchText) => {
+        const xpath = `//button[contains(text(), '${searchText}')]`;
+        const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+        const element = result.singleNodeValue;
+        return element ? true : false;
+    }, text);
+    if (button) {
+        // Si existe, obtenemos el elemento real para hacer clic
+        const elementHandle = await page.evaluateHandle((searchText) => {
+            const xpath = `//button[contains(text(), '${searchText}')]`;
+            const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+            return result.singleNodeValue;
+        }, text);
+        return elementHandle.asElement();
+    }
+    return null;
+}
+
 async function doPuppeteerSearch(bin) {
     let browser;
     try {
@@ -197,7 +213,7 @@ async function doPuppeteerSearch(bin) {
 
         const page = await browser.newPage();
 
-        // Configuración anti-detección
+        // Anti-detección
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         await page.evaluateOnNewDocument(() => {
             Object.defineProperty(navigator, 'webdriver', { get: () => false });
@@ -216,7 +232,7 @@ async function doPuppeteerSearch(bin) {
         await page.setDefaultNavigationTimeout(30000);
         await page.setDefaultTimeout(30000);
 
-        // ========== LOGIN ==========
+        // LOGIN
         const chkUrl = process.env.CHK_URL;
         console.log('🌐 Navegando a:', chkUrl);
         await page.goto(chkUrl, { waitUntil: 'networkidle2', timeout: 30000 });
@@ -244,7 +260,7 @@ async function doPuppeteerSearch(bin) {
         console.log('✅ Login completado');
         await new Promise(resolve => setTimeout(resolve, 5000));
 
-        // ========== BÚSQUEDA MEJORADA ==========
+        // BÚSQUEDA
         console.log(`🎯 Buscando BIN: ${bin}`);
         const searchInput = await page.$('input[placeholder="Search by 6-digit BIN..."]');
         if (!searchInput) throw new Error('No se encontró campo de búsqueda');
@@ -252,21 +268,22 @@ async function doPuppeteerSearch(bin) {
         await searchInput.click({ clickCount: 3 });
         await searchInput.type(bin, { delay: 100 });
 
-        // Disparar eventos para que la web detecte el cambio
+        // Disparar eventos input y change
         await searchInput.evaluate(el => el.dispatchEvent(new Event('input', { bubbles: true })));
         await searchInput.evaluate(el => el.dispatchEvent(new Event('change', { bubbles: true })));
 
-        // Buscar botón de búsqueda con múltiples selectores y XPath
+        // Buscar botón de búsqueda (sin $x)
         let searchBtn = await page.$('button[aria-label="Search"]');
         if (!searchBtn) searchBtn = await page.$('button[aria-label="Buscar"]');
         if (!searchBtn) searchBtn = await page.$('i.fa-search, .fa-search, .mdi-magnify, .search-icon');
         if (!searchBtn) searchBtn = await page.$('button[type="submit"]');
         if (!searchBtn) searchBtn = await page.$('.btn-search, .search-button, [role="button"] svg');
         if (!searchBtn) {
-            // Buscar por texto usando XPath
-            const xpath = '//button[contains(text(), "Search") or contains(text(), "Buscar")]';
-            const [btn] = await page.$x(xpath);
-            searchBtn = btn;
+            // Usar nuestra función segura que no usa page.$x
+            searchBtn = await findButtonByText(page, 'Search');
+        }
+        if (!searchBtn) {
+            searchBtn = await findButtonByText(page, 'Buscar');
         }
 
         if (searchBtn) {
@@ -281,7 +298,7 @@ async function doPuppeteerSearch(bin) {
             await new Promise(resolve => setTimeout(resolve, 5000));
         }
 
-        // Esperar a que aparezcan resultados en el DOM
+        // Esperar resultados
         console.log('⏳ Esperando resultados de búsqueda...');
         try {
             await page.waitForSelector('table tbody tr, .card-item, .result-row, [class*="card"]:not(.loader)', { timeout: 20000 });
@@ -291,11 +308,10 @@ async function doPuppeteerSearch(bin) {
         }
         await new Promise(resolve => setTimeout(resolve, 5000));
 
-        // ========== EXTRACCIÓN DE DATOS ==========
+        // EXTRACCIÓN
         const visibleText = await page.evaluate(() => document.body.innerText);
         console.log(`🔍 Texto visible (primeros 500 chars):\n${visibleText.substring(0, 500)}`);
 
-        // Validar si el BIN aparece en el texto
         if (!visibleText.includes(bin)) {
             console.log(`⚠️ ADVERTENCIA: El BIN ${bin} no aparece en el texto visible. La búsqueda probablemente falló.`);
         } else {
@@ -307,8 +323,6 @@ async function doPuppeteerSearch(bin) {
             const rows = Array.from(document.querySelectorAll('table tbody tr, .card-row, .result-item'));
             return rows.map(r => r.innerText).join('\n');
         });
-
-        // Intentar extraer datos de tarjetas desde atributos o data-* 
         const cardAttributes = await page.evaluate(() => {
             const cards = [];
             document.querySelectorAll('[data-card], [data-cc], [data-number]').forEach(el => {
@@ -320,7 +334,6 @@ async function doPuppeteerSearch(bin) {
         const combinedText = [visibleText, fullHtml, tableData, cardAttributes].join('\n');
         const cleanedText = combinedText.replace(/[\u200B-\u200D\uFEFF]/g, '');
 
-        // Patrones regex para tarjetas
         const cardPattern = /(\d{16})\D*(\d{2})\D*(\d{2,4})\D*(\d{3})/g;
         let tarjetas = new Set();
         let match;
@@ -336,7 +349,6 @@ async function doPuppeteerSearch(bin) {
             tarjetas.add(`${cardNumber}|${match[2]}|${year}|${match[4]}`);
         }
 
-        // Patrón para tarjetas en líneas separadas (ej: 4111111111111111, 12, 2025, 123)
         const pattern3 = /(\d{16})\s+(\d{2})\s+(\d{4})\s+(\d{3})/g;
         while ((match = pattern3.exec(cleanedText)) !== null) {
             tarjetas.add(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
@@ -359,7 +371,6 @@ async function doPuppeteerSearch(bin) {
     }
 }
 
-// ========== RUTA DE BÚSQUEDA ==========
 app.post('/api/search-bin', async (req, res) => {
     const { bin } = req.body;
     if (!bin || bin.length !== 6) {
@@ -374,7 +385,6 @@ app.post('/api/search-bin', async (req, res) => {
     }
 });
 
-// ========== RUTA DE TEST ==========
 app.get('/api/test-puppeteer', async (req, res) => {
     let browser;
     try {
@@ -389,7 +399,7 @@ app.get('/api/test-puppeteer', async (req, res) => {
         const page = await browser.newPage();
         await page.goto('https://example.com');
         const title = await page.title();
-        res.json({ success: true, message: 'Puppeteer funciona', title });
+        res.json({ success: true, message: '✅ Puppeteer funciona', title });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     } finally {
@@ -397,7 +407,6 @@ app.get('/api/test-puppeteer', async (req, res) => {
     }
 });
 
-// ========== INICIO DEL SERVIDOR ==========
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Servidor en puerto ${PORT}`);
     console.log(`🔧 Health: http://0.0.0.0:${PORT}/health`);
