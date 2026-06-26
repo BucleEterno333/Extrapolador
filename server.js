@@ -1,5 +1,5 @@
 // ==========================================
-// SERVER.JS - VERSIÓN CON CLIC FUERA DEL INPUT + REINTENTOS + FILTRADO DE VENCIDAS
+// SERVER.JS - CON DOMCONTENTLOADED Y REINTENTOS
 // ==========================================
 
 console.log('🎯 ===== INICIANDO SERVER.JS =====');
@@ -10,10 +10,35 @@ const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
 
+try {
+    require('dotenv').config();
+} catch (e) {}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// CORS actualizado
+// ===== VALIDACIÓN DE VARIABLES =====
+const requiredEnv = ['CHK_EMAIL', 'CHK_PASSWORD'];
+const missing = requiredEnv.filter(key => !process.env[key]);
+if (missing.length > 0) {
+    console.error(`❌ Faltan variables obligatorias: ${missing.join(', ')}`);
+    console.error('   Por favor, configúralas en el entorno.');
+} else {
+    console.log('✅ Credenciales configuradas.');
+}
+
+// URLs: si no se define CHK_SEARCH_URL, se usa CHK_URL
+const LOGIN_URL = process.env.CHK_LOGIN_URL || process.env.CHK_URL;
+const SEARCH_URL = process.env.CHK_SEARCH_URL || process.env.CHK_URL;
+
+if (!LOGIN_URL) {
+    console.error('❌ No se definió CHK_URL ni CHK_LOGIN_URL. El servidor no podrá navegar.');
+}
+
+console.log(`🔗 LOGIN_URL: ${LOGIN_URL || 'NO DEFINIDA'}`);
+console.log(`🔗 SEARCH_URL: ${SEARCH_URL || 'NO DEFINIDA'}`);
+
+// CORS
 app.use(cors({
     origin: [
         'https://astralchk.com',
@@ -36,43 +61,33 @@ async function findBrowser() {
     return undefined;
 }
 
-/**
- * Verifica si una tarjeta NO está vencida (fecha posterior o igual a 06/2026)
- * @param {string} month - Mes (2 dígitos)
- * @param {string} year - Año (2 dígitos, ej '26')
- * @returns {boolean} true si es válida (no vencida)
- */
 function isNotExpired(month, year) {
-    const currentYear = new Date().getFullYear() % 100; // Solo dos últimos dígitos
-    const currentMonth = new Date().getMonth() + 1;
-    // Para comparar con 06/2026, tratamos 2026 como '26'
     const yearNum = parseInt(year, 10);
     const monthNum = parseInt(month, 10);
     if (yearNum > 26) return true;
     if (yearNum < 26) return false;
-    // yearNum === 26
     return monthNum >= 6;
 }
 
-/**
- * Filtra las tarjetas según el BIN y la fecha de vencimiento
- * @param {string[]} cards - Array de strings "16dígitos|MM|YY|CVV"
- * @param {string} targetBin - BIN de 6 dígitos a verificar
- * @returns {string[]} Tarjetas que coinciden en BIN y no están vencidas
- */
 function filterCardsByBinAndExpiry(cards, targetBin) {
     return cards.filter(cardStr => {
         const parts = cardStr.split('|');
         if (parts.length !== 4) return false;
-        const [cardNumber, expMonth, expYear, cvv] = parts;
+        const [cardNumber, expMonth, expYear] = parts;
         const cardBin = cardNumber.substring(0, 6);
         if (cardBin !== targetBin) return false;
-        // Validar que no esté vencida
         return isNotExpired(expMonth, expYear);
     });
 }
 
 async function doPuppeteerSearch(bin) {
+    if (!LOGIN_URL || !SEARCH_URL) {
+        throw new Error('Falta URL de login o búsqueda. Verifica las variables CHK_URL, CHK_LOGIN_URL y CHK_SEARCH_URL.');
+    }
+    if (!process.env.CHK_EMAIL || !process.env.CHK_PASSWORD) {
+        throw new Error('Faltan credenciales (CHK_EMAIL / CHK_PASSWORD).');
+    }
+
     const MAX_ATTEMPTS = 3;
     let attempt = 0;
     let lastError = null;
@@ -82,13 +97,12 @@ async function doPuppeteerSearch(bin) {
         console.log(`\n🔁 Intento ${attempt} de ${MAX_ATTEMPTS} para BIN: ${bin}`);
         let browser;
         try {
-            console.log(`🚀 Iniciando Puppeteer para BIN: ${bin}`);
             const browserPath = await findBrowser();
             const launchOptions = {
                 headless: 'new',
                 args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
                 defaultViewport: { width: 1366, height: 768 },
-                timeout: 60000
+                timeout: 120000
             };
             if (browserPath) launchOptions.executablePath = browserPath;
 
@@ -98,43 +112,54 @@ async function doPuppeteerSearch(bin) {
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
             // === LOGIN ===
-            console.log('🌐 Navegando a:', process.env.CHK_URL);
-            await page.goto(process.env.CHK_URL, { waitUntil: 'networkidle2', timeout: 30000 });
+            console.log(`🌐 Navegando a login: ${LOGIN_URL}`);
+            await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 120000 });
+
+            // Esperar campos de login
+            console.log('🔍 Esperando campos de login...');
+            await page.waitForSelector('input[type="email"]', { timeout: 30000 });
+            await page.waitForSelector('input[type="password"]', { timeout: 30000 });
 
             console.log('🔑 Iniciando sesión...');
             await page.type('input[type="email"]', process.env.CHK_EMAIL, { delay: 30 });
             await page.type('input[type="password"]', process.env.CHK_PASSWORD, { delay: 30 });
             await page.click('button[type="submit"]');
-            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 });
-            console.log('✅ Login completado');
 
-            // Espera 30 segundos después del login
-            console.log('⏳ Esperando 30 segundos después del login...');
-            await new Promise(r => setTimeout(r, 30000));
+            // Esperar a que la navegación termine (redirección post-login)
+            console.log(`⏳ Esperando redirección...`);
+            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 120000 });
 
-            // === BÚSQUEDA DEL BIN (VERSIÓN ROBUSTA) ===
+            // Si la URL actual no es la de búsqueda, navegar a ella
+            const currentUrl = page.url();
+            if (!currentUrl.includes(SEARCH_URL)) {
+                console.log(`⚠️ La URL actual (${currentUrl}) no es la de búsqueda. Navegando a ${SEARCH_URL}`);
+                await page.goto(SEARCH_URL, { waitUntil: 'domcontentloaded', timeout: 120000 });
+            }
+
+            console.log('✅ Login completado y en página de búsqueda.');
+
+            // Espera estabilizadora (opcional, pero ayuda)
+            console.log('⏳ Esperando 5 segundos para estabilizar...');
+            await new Promise(r => setTimeout(r, 5000));
+
+            // === BÚSQUEDA DEL BIN ===
             console.log(`🎯 Buscando BIN: ${bin}`);
-
-            await page.waitForSelector('input[placeholder="Search by 6-digit BIN..."]', { timeout: 10000 });
+            await page.waitForSelector('input[placeholder="Search by 6-digit BIN..."]', { timeout: 30000 });
             const searchInput = await page.$('input[placeholder="Search by 6-digit BIN..."]');
 
             // Limpiar campo
             await searchInput.click({ clickCount: 3 });
-            await searchInput.press('Backspace');
-            await searchInput.press('Backspace');
-            await searchInput.press('Backspace');
-            await searchInput.press('Backspace');
-            await searchInput.press('Backspace');
-            await searchInput.press('Backspace');
+            for (let i = 0; i < 6; i++) await searchInput.press('Backspace');
 
             await searchInput.type(bin, { delay: 100 });
 
             const valorActual = await page.evaluate(el => el.value, searchInput);
             if (valorActual !== bin) {
-                console.log(`⚠️ Valor escrito no coincide: ${valorActual} vs ${bin}, reintentando...`);
+                console.log(`⚠️ Valor escrito no coincide: ${valorActual} vs ${bin}, corrigiendo...`);
                 await searchInput.evaluate((el, val) => { el.value = val; }, bin);
             }
 
+            // Disparar eventos
             await page.evaluate(() => {
                 const input = document.querySelector('input[placeholder="Search by 6-digit BIN..."]');
                 if (input) {
@@ -144,7 +169,6 @@ async function doPuppeteerSearch(bin) {
                     input.dispatchEvent(new Event('blur', { bubbles: true }));
                 }
             });
-
             await page.evaluate((binBuscado) => {
                 if (window.searchCards) window.searchCards(binBuscado);
                 if (window.filterCards) window.filterCards(binBuscado);
@@ -158,16 +182,16 @@ async function doPuppeteerSearch(bin) {
             await new Promise(r => setTimeout(r, 500));
             console.log(`✅ BIN ${bin} escrito y eventos disparados`);
 
-            console.log('⏳ Esperando 30 segundos para que carguen los resultados...');
-            await new Promise(r => setTimeout(r, 30000));
+            console.log('⏳ Esperando 20 segundos para que carguen los resultados...');
+            await new Promise(r => setTimeout(r, 20000));
 
             // Quitar foco
-            console.log('🖱️ Haciendo clic fuera del input para quitar el foco...');
+            console.log('🖱️ Haciendo clic fuera del input...');
             await page.click('body');
             await new Promise(r => setTimeout(r, 500));
 
             // Seleccionar todo
-            console.log('📋 Seleccionando todo el contenido de la página...');
+            console.log('📋 Seleccionando todo el contenido...');
             await page.keyboard.down('Control');
             await page.keyboard.press('a');
             await page.keyboard.up('Control');
@@ -183,7 +207,7 @@ async function doPuppeteerSearch(bin) {
 
             console.log(`🔍 Texto seleccionado (primeros 500 chars):\n${selectedText.substring(0, 500)}`);
 
-            // Extracción de tarjetas
+            // Extraer tarjetas
             const cardPattern = /(\d{16})\D*(\d{2})\D*(\d{4})\D*(\d{3})/g;
             let tarjetas = new Set();
             let match;
@@ -201,11 +225,9 @@ async function doPuppeteerSearch(bin) {
             const rawCards = Array.from(tarjetas);
             console.log(`🔎 Tarjetas extraídas (sin filtrar): ${rawCards.length}`);
 
-            // Filtrar por BIN y fecha de expiración
             const validCards = filterCardsByBinAndExpiry(rawCards, bin);
             console.log(`✅ Después de filtrar (BIN correcto y no vencidas): ${validCards.length}`);
 
-            // Condición de éxito: al menos una tarjeta válida y que coincida con el BIN
             if (validCards.length > 0) {
                 console.log(`🎉 Éxito en intento ${attempt}`);
                 return {
@@ -220,23 +242,23 @@ async function doPuppeteerSearch(bin) {
                 if (rawCards.length > 0) {
                     console.log(`   Se encontraron ${rawCards.length} tarjetas pero ninguna coincidía con el BIN o estaban vencidas.`);
                 }
-                // No lanzamos error, solo continuamos al siguiente intento
                 lastError = new Error(`Intento ${attempt}: sin tarjetas válidas para BIN ${bin}`);
             }
         } catch (error) {
             console.error(`❌ Error en intento ${attempt}:`, error.message);
             lastError = error;
+            if (error.message.includes('CHK_') || error.message.includes('URL')) {
+                throw error;
+            }
         } finally {
             if (browser) await browser.close().catch(console.error);
         }
     }
 
-    // Si llegamos aquí, todos los intentos fallaron
     console.log(`❌ Todos los ${MAX_ATTEMPTS} intentos fallaron.`);
     throw lastError || new Error(`No se pudieron obtener tarjetas válidas para el BIN ${bin} después de ${MAX_ATTEMPTS} intentos`);
 }
 
-// Ruta de búsqueda
 app.post('/api/search-bin', async (req, res) => {
     const { bin } = req.body;
     if (!bin || bin.length !== 6) {
@@ -251,14 +273,13 @@ app.post('/api/search-bin', async (req, res) => {
     }
 });
 
-// Ruta de prueba
 app.get('/api/test-puppeteer', async (req, res) => {
     let browser;
     try {
         const browserPath = await findBrowser();
         browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'], executablePath: browserPath });
         const page = await browser.newPage();
-        await page.goto('https://example.com');
+        await page.goto('https://example.com', { waitUntil: 'domcontentloaded' });
         const title = await page.title();
         res.json({ success: true, title });
     } catch (error) {
