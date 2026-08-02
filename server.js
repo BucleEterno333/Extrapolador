@@ -1,5 +1,5 @@
 // ==========================================
-// SERVER.JS - VERSIÓN CON CLIC FUERA DEL INPUT + REINTENTOS + FILTRADO DE VENCIDAS
+// SERVER.JS - TIME OUTS EXAGERADOS PARA 525 MB RAM
 // ==========================================
 
 console.log('🎯 ===== INICIANDO SERVER.JS =====');
@@ -38,27 +38,17 @@ async function findBrowser() {
 
 /**
  * Verifica si una tarjeta NO está vencida (fecha posterior o igual a 06/2026)
- * @param {string} month - Mes (2 dígitos)
- * @param {string} year - Año (2 dígitos, ej '26')
- * @returns {boolean} true si es válida (no vencida)
  */
 function isNotExpired(month, year) {
-    const currentYear = new Date().getFullYear() % 100; // Solo dos últimos dígitos
-    const currentMonth = new Date().getMonth() + 1;
-    // Para comparar con 06/2026, tratamos 2026 como '26'
     const yearNum = parseInt(year, 10);
     const monthNum = parseInt(month, 10);
     if (yearNum > 26) return true;
     if (yearNum < 26) return false;
-    // yearNum === 26
     return monthNum >= 6;
 }
 
 /**
  * Filtra las tarjetas según el BIN y la fecha de vencimiento
- * @param {string[]} cards - Array de strings "16dígitos|MM|YY|CVV"
- * @param {string} targetBin - BIN de 6 dígitos a verificar
- * @returns {string[]} Tarjetas que coinciden en BIN y no están vencidas
  */
 function filterCardsByBinAndExpiry(cards, targetBin) {
     return cards.filter(cardStr => {
@@ -67,7 +57,6 @@ function filterCardsByBinAndExpiry(cards, targetBin) {
         const [cardNumber, expMonth, expYear, cvv] = parts;
         const cardBin = cardNumber.substring(0, 6);
         if (cardBin !== targetBin) return false;
-        // Validar que no esté vencida
         return isNotExpired(expMonth, expYear);
     });
 }
@@ -88,7 +77,7 @@ async function doPuppeteerSearch(bin) {
                 headless: 'new',
                 args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
                 defaultViewport: { width: 1366, height: 768 },
-                timeout: 60000
+                timeout: 180000  // ⬆️ 3 minutos para lanzar el navegador
             };
             if (browserPath) launchOptions.executablePath = browserPath;
 
@@ -99,33 +88,36 @@ async function doPuppeteerSearch(bin) {
 
             // === LOGIN ===
             console.log('🌐 Navegando a:', process.env.CHK_URL);
-            await page.goto(process.env.CHK_URL, { waitUntil: 'networkidle2', timeout: 30000 });
+            await page.goto(process.env.CHK_URL, { 
+                waitUntil: 'networkidle2', 
+                timeout: 120000  // ⬆️ 2 minutos para cargar la página
+            });
 
             console.log('🔑 Iniciando sesión...');
             await page.type('input[type="email"]', process.env.CHK_EMAIL, { delay: 30 });
             await page.type('input[type="password"]', process.env.CHK_PASSWORD, { delay: 30 });
             await page.click('button[type="submit"]');
-            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 });
+            await page.waitForNavigation({ 
+                waitUntil: 'networkidle2', 
+                timeout: 120000  // ⬆️ 2 minutos para la redirección post-login
+            });
             console.log('✅ Login completado');
 
-            // Espera 30 segundos después del login
-            console.log('⏳ Esperando 30 segundos después del login...');
-            await new Promise(r => setTimeout(r, 30000));
+            // ⬆️ Espera exagerada de 60 segundos para estabilizar la sesión
+            console.log('⏳ Esperando 60 segundos después del login...');
+            await new Promise(r => setTimeout(r, 60000));
 
-            // === BÚSQUEDA DEL BIN (VERSIÓN ROBUSTA) ===
+            // === BÚSQUEDA DEL BIN ===
             console.log(`🎯 Buscando BIN: ${bin}`);
 
-            await page.waitForSelector('input[placeholder="Search by 6-digit BIN..."]', { timeout: 10000 });
+            await page.waitForSelector('input[placeholder="Search by 6-digit BIN..."]', { 
+                timeout: 60000  // ⬆️ 1 minuto para que aparezca el input
+            });
             const searchInput = await page.$('input[placeholder="Search by 6-digit BIN..."]');
 
             // Limpiar campo
             await searchInput.click({ clickCount: 3 });
-            await searchInput.press('Backspace');
-            await searchInput.press('Backspace');
-            await searchInput.press('Backspace');
-            await searchInput.press('Backspace');
-            await searchInput.press('Backspace');
-            await searchInput.press('Backspace');
+            for (let i = 0; i < 10; i++) await searchInput.press('Backspace');  // ⬆️ más borrados por si acaso
 
             await searchInput.type(bin, { delay: 100 });
 
@@ -155,16 +147,17 @@ async function doPuppeteerSearch(bin) {
                 }
             }, bin);
 
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 1000));  // ⬆️ 1 segundo de pausa
             console.log(`✅ BIN ${bin} escrito y eventos disparados`);
 
-            console.log('⏳ Esperando 30 segundos para que carguen los resultados...');
-            await new Promise(r => setTimeout(r, 30000));
+            // ⬆️ Espera exagerada de 60 segundos para que carguen los resultados
+            console.log('⏳ Esperando 60 segundos para que carguen los resultados...');
+            await new Promise(r => setTimeout(r, 60000));
 
             // Quitar foco
             console.log('🖱️ Haciendo clic fuera del input para quitar el foco...');
             await page.click('body');
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 1000));  // ⬆️ 1 segundo
 
             // Seleccionar todo
             console.log('📋 Seleccionando todo el contenido de la página...');
@@ -183,29 +176,36 @@ async function doPuppeteerSearch(bin) {
 
             console.log(`🔍 Texto seleccionado (primeros 500 chars):\n${selectedText.substring(0, 500)}`);
 
-            // Extracción de tarjetas
-            const cardPattern = /(\d{16})\D*(\d{2})\D*(\d{4})\D*(\d{3})/g;
+            // Extracción de tarjetas (soporte 15/16 dígitos, año 2/4 dígitos, CVV 3/4)
+            const cardPattern = /(\d{15,16})\D*(\d{1,2})\D*(\d{2,4})\D*(\d{3,4})/g;
             let tarjetas = new Set();
             let match;
             while ((match = cardPattern.exec(selectedText)) !== null) {
-                tarjetas.add(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
+                let month = match[2].padStart(2, '0');
+                let year = match[3];
+                if (year.length === 4) year = year.slice(-2);
+                let cvv = match[4].padStart(3, '0');
+                tarjetas.add(`${match[1]}|${month}|${year}|${cvv}`);
             }
 
+            // Patrón alternativo con separadores
             if (tarjetas.size === 0) {
-                const pattern2 = /(\d{16})\s*[|\-\s]\s*(\d{2})\s*[|\-\s]\s*(\d{4})\s*[|\-\s]\s*(\d{3})/g;
+                const pattern2 = /(\d{15,16})\s*[|│\s-]\s*(\d{1,2})\s*[|│\s-]\s*(\d{2,4})\s*[|│\s-]\s*(\d{3,4})/g;
                 while ((match = pattern2.exec(selectedText)) !== null) {
-                    tarjetas.add(`${match[1]}|${match[2]}|${match[3]}|${match[4]}`);
+                    let month = match[2].padStart(2, '0');
+                    let year = match[3];
+                    if (year.length === 4) year = year.slice(-2);
+                    let cvv = match[4].padStart(3, '0');
+                    tarjetas.add(`${match[1]}|${month}|${year}|${cvv}`);
                 }
             }
 
             const rawCards = Array.from(tarjetas);
             console.log(`🔎 Tarjetas extraídas (sin filtrar): ${rawCards.length}`);
 
-            // Filtrar por BIN y fecha de expiración
             const validCards = filterCardsByBinAndExpiry(rawCards, bin);
             console.log(`✅ Después de filtrar (BIN correcto y no vencidas): ${validCards.length}`);
 
-            // Condición de éxito: al menos una tarjeta válida y que coincida con el BIN
             if (validCards.length > 0) {
                 console.log(`🎉 Éxito en intento ${attempt}`);
                 return {
@@ -220,7 +220,6 @@ async function doPuppeteerSearch(bin) {
                 if (rawCards.length > 0) {
                     console.log(`   Se encontraron ${rawCards.length} tarjetas pero ninguna coincidía con el BIN o estaban vencidas.`);
                 }
-                // No lanzamos error, solo continuamos al siguiente intento
                 lastError = new Error(`Intento ${attempt}: sin tarjetas válidas para BIN ${bin}`);
             }
         } catch (error) {
@@ -231,7 +230,6 @@ async function doPuppeteerSearch(bin) {
         }
     }
 
-    // Si llegamos aquí, todos los intentos fallaron
     console.log(`❌ Todos los ${MAX_ATTEMPTS} intentos fallaron.`);
     throw lastError || new Error(`No se pudieron obtener tarjetas válidas para el BIN ${bin} después de ${MAX_ATTEMPTS} intentos`);
 }
@@ -256,9 +254,14 @@ app.get('/api/test-puppeteer', async (req, res) => {
     let browser;
     try {
         const browserPath = await findBrowser();
-        browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'], executablePath: browserPath });
+        browser = await puppeteer.launch({ 
+            headless: 'new', 
+            args: ['--no-sandbox'], 
+            executablePath: browserPath,
+            timeout: 120000  // ⬆️ 2 minutos
+        });
         const page = await browser.newPage();
-        await page.goto('https://example.com');
+        await page.goto('https://example.com', { timeout: 60000 });
         const title = await page.title();
         res.json({ success: true, title });
     } catch (error) {
