@@ -105,7 +105,7 @@ async function doPuppeteerSearch(bin) {
 
             // ⬆️ Espera exagerada de 90 segundos para estabilizar la sesión
             console.log('⏳ Esperando 90 segundos después del login...');
-            await new Promise(r => setTimeout(r, 90000));
+            await new Promise(r => setTimeout(r, 120000));
 
             // === BÚSQUEDA DEL BIN ===
             console.log(`🎯 Buscando BIN: ${bin}`);
