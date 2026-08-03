@@ -90,7 +90,7 @@ async function doPuppeteerSearch(bin) {
             console.log('🌐 Navegando a:', process.env.CHK_URL);
             await page.goto(process.env.CHK_URL, { 
                 waitUntil: 'networkidle2', 
-                timeout: 120000  // ⬆️ 2 minutos para cargar la página
+                timeout: 300000  // ⬆️ 5 minutos para cargar la página
             });
 
             console.log('🔑 Iniciando sesión...');
@@ -99,7 +99,7 @@ async function doPuppeteerSearch(bin) {
             await page.click('button[type="submit"]');
             await page.waitForNavigation({ 
                 waitUntil: 'networkidle2', 
-                timeout: 120000  // ⬆️ 2 minutos para la redirección post-login
+                timeout: 300000  // ⬆️ 5 minutos para la redirección post-login
             });
             console.log('✅ Login completado');
 
@@ -273,7 +273,7 @@ app.get('/api/test-puppeteer', async (req, res) => {
             headless: 'new', 
             args: ['--no-sandbox'], 
             executablePath: browserPath,
-            timeout: 120000  // ⬆️ 2 minutos
+            timeout: 300000  // ⬆️ 5 minutos
         });
         const page = await browser.newPage();
         await page.goto('https://example.com', { timeout: 60000 });
