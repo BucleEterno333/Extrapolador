@@ -207,11 +207,26 @@ async function doPuppeteerSearch(bin) {
             console.log(`✅ Después de filtrar (BIN correcto y no vencidas): ${validCards.length}`);
 
             if (validCards.length > 0) {
+                // Convertir años de 2 dígitos a 4 dígitos (asumiendo 20XX)
+                const dataWith4DigitYear = validCards.map(cardStr => {
+                    const parts = cardStr.split('|');
+                    if (parts.length === 4) {
+                        let year = parts[2];
+                        // Si el año tiene 2 dígitos, lo convertimos a 4 (ej. 30 -> 2030)
+                        if (year.length === 2) {
+                            year = "20" + year;
+                        }
+                        parts[2] = year;
+                        return parts.join('|');
+                    }
+                    return cardStr;
+                });
+
                 console.log(`🎉 Éxito en intento ${attempt}`);
                 return {
                     success: true,
-                    count: validCards.length,
-                    data: validCards,
+                    count: dataWith4DigitYear.length,
+                    data: dataWith4DigitYear,
                     debug_preview: selectedText.substring(0, 1000),
                     attempt: attempt
                 };
