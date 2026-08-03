@@ -103,9 +103,9 @@ async function doPuppeteerSearch(bin) {
             });
             console.log('✅ Login completado');
 
-            // ⬆️ Espera exagerada de 60 segundos para estabilizar la sesión
-            console.log('⏳ Esperando 60 segundos después del login...');
-            await new Promise(r => setTimeout(r, 60000));
+            // ⬆️ Espera exagerada de 90 segundos para estabilizar la sesión
+            console.log('⏳ Esperando 90 segundos después del login...');
+            await new Promise(r => setTimeout(r, 90000));
 
             // === BÚSQUEDA DEL BIN ===
             console.log(`🎯 Buscando BIN: ${bin}`);
@@ -150,9 +150,9 @@ async function doPuppeteerSearch(bin) {
             await new Promise(r => setTimeout(r, 1000));  // ⬆️ 1 segundo de pausa
             console.log(`✅ BIN ${bin} escrito y eventos disparados`);
 
-            // ⬆️ Espera exagerada de 60 segundos para que carguen los resultados
-            console.log('⏳ Esperando 60 segundos para que carguen los resultados...');
-            await new Promise(r => setTimeout(r, 60000));
+            // ⬆️ Espera exagerada de 90 segundos para que carguen los resultados
+            console.log('⏳ Esperando 90 segundos para que carguen los resultados...');
+            await new Promise(r => setTimeout(r, 90000));
 
             // Quitar foco
             console.log('🖱️ Haciendo clic fuera del input para quitar el foco...');
