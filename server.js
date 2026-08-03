@@ -150,9 +150,9 @@ async function doPuppeteerSearch(bin) {
             await new Promise(r => setTimeout(r, 1000));  // ⬆️ 1 segundo de pausa
             console.log(`✅ BIN ${bin} escrito y eventos disparados`);
 
-            // ⬆️ Espera exagerada de 150 segundos para que carguen los resultados
-            console.log('⏳ Esperando 150 segundos para que carguen los resultados...');
-            await new Promise(r => setTimeout(r, 150000));
+            // ⬆️ Espera exagerada de 200 segundos para que carguen los resultados
+            console.log('⏳ Esperando 200 segundos para que carguen los resultados...');
+            await new Promise(r => setTimeout(r, 200000));
 
             // Quitar foco
             console.log('🖱️ Haciendo clic fuera del input para quitar el foco...');
