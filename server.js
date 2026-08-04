@@ -107,28 +107,55 @@ async function doPuppeteerSearch(bin) {
             console.log('⏳ Esperando 120 segundos después del login...');
             await new Promise(r => setTimeout(r, 120000));
 
-            // === BÚSQUEDA DEL BIN ===
+            // === BÚSQUEDA DEL BIN (SELECTOR FLEXIBLE) ===
             console.log(`🎯 Buscando BIN: ${bin}`);
 
-            await page.waitForSelector('input[placeholder="Search by 6-digit BIN..."]', { 
-                timeout: 60000  // ⬆️ 1 minuto para que aparezca el input
-            });
-            const searchInput = await page.$('input[placeholder="Search by 6-digit BIN..."]');
+            // Intentar varios selectores posibles
+            const selectors = [
+                'input[placeholder*="Search by"]',
+                'input[placeholder*="BIN"]',
+                'input[placeholder*="search"]',
+                'input[maxlength="6"][type="text"]',
+                'input[placeholder="Search by 6-digit BIN..."]'
+            ];
+
+            let searchInput = null;
+            for (const sel of selectors) {
+                try {
+                    await page.waitForSelector(sel, { timeout: 10000, visible: true });
+                    searchInput = await page.$(sel);
+                    if (searchInput) {
+                        console.log(`✅ Selector encontrado: ${sel}`);
+                        break;
+                    }
+                } catch (e) {
+                    // Continuar con el siguiente selector
+                }
+            }
+
+            if (!searchInput) {
+                // Si no se encuentra, tomar captura y lanzar error
+                await page.screenshot({ path: 'debug_no_input.png' });
+                const html = await page.content();
+                console.log('🔍 HTML de la página (primeros 500 chars):', html.substring(0, 500));
+                throw new Error('No se encontró el input de búsqueda con ningún selector');
+            }
 
             // Limpiar campo
             await searchInput.click({ clickCount: 3 });
-            for (let i = 0; i < 10; i++) await searchInput.press('Backspace');  // ⬆️ más borrados por si acaso
+            for (let i = 0; i < 10; i++) await searchInput.press('Backspace');
 
             await searchInput.type(bin, { delay: 100 });
 
             const valorActual = await page.evaluate(el => el.value, searchInput);
             if (valorActual !== bin) {
-                console.log(`⚠️ Valor escrito no coincide: ${valorActual} vs ${bin}, reintentando...`);
+                console.log(`⚠️ Valor escrito no coincide: ${valorActual} vs ${bin}, corrigiendo...`);
                 await searchInput.evaluate((el, val) => { el.value = val; }, bin);
             }
 
+            // Disparar eventos
             await page.evaluate(() => {
-                const input = document.querySelector('input[placeholder="Search by 6-digit BIN..."]');
+                const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
                 if (input) {
                     input.dispatchEvent(new Event('input', { bubbles: true }));
                     input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -137,22 +164,13 @@ async function doPuppeteerSearch(bin) {
                 }
             });
 
-            await page.evaluate((binBuscado) => {
-                if (window.searchCards) window.searchCards(binBuscado);
-                if (window.filterCards) window.filterCards(binBuscado);
-                const input = document.querySelector('input[placeholder="Search by 6-digit BIN..."]');
-                if (input) {
-                    const enterEvent = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true });
-                    input.dispatchEvent(enterEvent);
-                }
-            }, bin);
+            // Presionar Enter directamente
+            await searchInput.press('Enter');
 
-            await new Promise(r => setTimeout(r, 1000));  // ⬆️ 1 segundo de pausa
             console.log(`✅ BIN ${bin} escrito y eventos disparados`);
 
-            // ⬆️ Espera exagerada de 200 segundos para que carguen los resultados
-            console.log('⏳ Esperando 200 segundos para que carguen los resultados...');
-            await new Promise(r => setTimeout(r, 200000));
+            console.log('⏳ Esperando 120 segundos para que carguen los resultados...');
+            await new Promise(r => setTimeout(r, 120000));
 
             // Quitar foco
             console.log('🖱️ Haciendo clic fuera del input para quitar el foco...');
