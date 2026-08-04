@@ -126,42 +126,22 @@ async function doPuppeteerSearch(bin) {
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-        // === LOGIN ===
-        console.log(`🌐 Navegando a: ${process.env.CHK_URL}`);
-        await page.goto(process.env.CHK_URL, { waitUntil: 'domcontentloaded', timeout: 120000 });
+            // === LOGIN ===
+            console.log('🌐 Navegando a:', process.env.CHK_URL);
+            await page.goto(process.env.CHK_URL, { 
+                waitUntil: 'networkidle2', 
+                timeout: 300000  // ⬆️ 5 minutos para cargar la página
+            });
 
-        console.log('🔍 Esperando campos de login...');
-        await page.waitForSelector('input[type="email"]', { timeout: 30000 });
-        await page.waitForSelector('input[type="password"]', { timeout: 30000 });
-
-        console.log('🔑 Rellenando credenciales...');
-        await page.type('input[type="email"]', process.env.CHK_EMAIL, { delay: 30 });
-        await page.type('input[type="password"]', process.env.CHK_PASSWORD, { delay: 30 });
-
-        // Intentar varios selectores para el botón de submit
-        console.log('🔍 Buscando botón de submit...');
-        const submitSelectors = [
-            'button[type="submit"]',
-            'button[type="button"]',
-            'input[type="submit"]',
-            'button:has-text("Sign In")',
-            'button:has-text("Login")',
-            'button:has-text("Ingresar")'
-        ];
-        let clicked = false;
-        for (const selector of submitSelectors) {
-            try {
-                await page.click(selector, { timeout: 5000 });
-                clicked = true;
-                console.log(`   ✅ Clic en ${selector}`);
-                break;
-            } catch (e) {
-                // Intentar siguiente
-            }
-        }
-        if (!clicked) {
-            throw new Error('No se encontró el botón de submit');
-        }
+            console.log('🔑 Iniciando sesión...');
+            await page.type('input[type="email"]', process.env.CHK_EMAIL, { delay: 30 });
+            await page.type('input[type="password"]', process.env.CHK_PASSWORD, { delay: 30 });
+            await page.click('button[type="submit"]');
+            await page.waitForNavigation({ 
+                waitUntil: 'networkidle2', 
+                timeout: 300000  // ⬆️ 5 minutos para la redirección post-login
+            });
+            console.log('✅ Login completado');
 
         // Esperar a que aparezca el input de búsqueda (esto confirma login exitoso)
         console.log('⏳ Esperando carga de la página de búsqueda (puede tardar varios minutos)...');
