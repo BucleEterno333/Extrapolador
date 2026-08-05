@@ -129,7 +129,7 @@ async function doPuppeteerSearch(bin) {
         // === LOGIN (EXACTAMENTE COMO EN TU VERSIÓN ORIGINAL) ===
         console.log('🌐 Navegando a:', process.env.CHK_URL);
         await page.goto(process.env.CHK_URL, {
-            waitUntil: 'networkidle2',
+            waitUntil: 'domcontentloaded',
             timeout: 300000  // 5 minutos
         });
 
@@ -138,7 +138,7 @@ async function doPuppeteerSearch(bin) {
         await page.type('input[type="password"]', process.env.CHK_PASSWORD, { delay: 30 });
         await page.click('button[type="submit"]');
         await page.waitForNavigation({
-            waitUntil: 'networkidle2',
+            waitUntil: 'domcontentloaded',
             timeout: 300000  // 5 minutos
         });
         console.log('✅ Login completado');
