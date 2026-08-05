@@ -1,5 +1,5 @@
 // ==========================================
-// SERVER.JS - POLLING INTELIGENTE SIN REINTENTOS (CON LOGIN ORIGINAL)
+// SERVER.JS - POLLING INTELIGENTE + ESPERA EXTRA TRAS DETECCIÓN
 // ==========================================
 
 console.log('🎯 ===== INICIANDO SERVER.JS =====');
@@ -56,9 +56,6 @@ function filterCardsByBinAndExpiry(cards, targetBin) {
     });
 }
 
-/**
- * Extrae tarjetas de un texto usando regex flexible (15/16 dígitos, año 2/4, CVV 3/4)
- */
 function extractCardsFromText(text) {
     const cardPattern = /(\d{15,16})\D*(\d{1,2})\D*(\d{2,4})\D*(\d{3,4})/g;
     const tarjetas = new Set();
@@ -70,7 +67,6 @@ function extractCardsFromText(text) {
         let cvv = match[4].padStart(3, '0');
         tarjetas.add(`${match[1]}|${month}|${year}|${cvv}`);
     }
-    // Segundo patrón por si hay separadores extraños
     if (tarjetas.size === 0) {
         const pattern2 = /(\d{15,16})\s*[|│\s-]\s*(\d{1,2})\s*[|│\s-]\s*(\d{2,4})\s*[|│\s-]\s*(\d{3,4})/g;
         while ((match = pattern2.exec(text)) !== null) {
@@ -84,16 +80,10 @@ function extractCardsFromText(text) {
     return Array.from(tarjetas);
 }
 
-/**
- * Obtiene el texto completo de la página (body innerText) - más rápido que Ctrl+A
- */
 async function getPageText(page) {
     return await page.evaluate(() => document.body.innerText);
 }
 
-/**
- * Espera con polling hasta que se cumpla una condición o se alcance un timeout
- */
 async function waitForCondition(page, checkFn, intervalMs = 3000, timeoutMs = 1200000) {
     const start = Date.now();
     let lastResult = null;
@@ -126,11 +116,11 @@ async function doPuppeteerSearch(bin) {
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-        // === LOGIN (EXACTAMENTE COMO EN TU VERSIÓN ORIGINAL) ===
+        // === LOGIN (usando domcontentloaded para mayor velocidad) ===
         console.log('🌐 Navegando a:', process.env.CHK_URL);
         await page.goto(process.env.CHK_URL, {
             waitUntil: 'domcontentloaded',
-            timeout: 300000  // 5 minutos
+            timeout: 300000
         });
 
         console.log('🔑 Iniciando sesión...');
@@ -139,64 +129,57 @@ async function doPuppeteerSearch(bin) {
         await page.click('button[type="submit"]');
         await page.waitForNavigation({
             waitUntil: 'domcontentloaded',
-            timeout: 300000  // 5 minutos
+            timeout: 300000
         });
         console.log('✅ Login completado');
 
-        // === ESPERAR A QUE APAREZCA EL INPUT DE BÚSQUEDA ===
-        console.log('⏳ Esperando carga de la página de búsqueda (puede tardar varios minutos)...');
+        // === ESPERAR INPUT DE BÚSQUEDA ===
+        console.log('⏳ Esperando carga de la página de búsqueda...');
         const searchInputSelectors = [
             'input[placeholder*="Search by"]',
             'input[placeholder*="BIN"]',
-            'input[placeholder*="search"]',
             'input[maxlength="6"][type="text"]',
-            'input[placeholder="Search by 6-digit BIN..."]',
-            'input[data-v-6e92ebc5][type="text"]'  // específico del HTML actual
+            'input[data-v-6e92ebc5][type="text"]'
         ];
 
         let searchInput = null;
-        let foundSelector = null;
         for (const sel of searchInputSelectors) {
             try {
                 await page.waitForSelector(sel, { timeout: 10000, visible: true });
                 searchInput = await page.$(sel);
                 if (searchInput) {
-                    foundSelector = sel;
-                    console.log(`✅ Input de búsqueda encontrado con selector: ${sel}`);
+                    console.log(`✅ Input encontrado con: ${sel}`);
                     break;
                 }
-            } catch (e) {
-                // Continuar con el siguiente selector
-            }
+            } catch (e) {}
         }
 
         if (!searchInput) {
             await page.screenshot({ path: 'debug_no_input.png' });
             const html = await page.content();
-            console.log('🔍 HTML de la página (primeros 500 chars):', html.substring(0, 500));
-            throw new Error('No se encontró el input de búsqueda con ningún selector');
+            console.log('🔍 HTML (primeros 500 chars):', html.substring(0, 500));
+            throw new Error('No se encontró el input de búsqueda');
         }
 
-        // === ESPERAR A QUE CARGUEN LAS TARJETAS INICIALES (RANDOM) ===
-        console.log('⏳ Esperando que las tarjetas iniciales carguen (polling cada 3s)...');
+        // === ESPERAR TARJETAS INICIALES ===
+        console.log('⏳ Esperando tarjetas iniciales (polling cada 3s)...');
         const initialCards = await waitForCondition(
             page,
             async () => {
                 const text = await getPageText(page);
                 const cards = extractCardsFromText(text);
                 if (cards.length > 0) {
-                    console.log(`🔎 Tarjetas iniciales detectadas: ${cards.length}`);
+                    console.log(`🔎 Tarjetas iniciales: ${cards.length}`);
                     return cards;
                 }
                 return null;
             },
-            3000,   // intervalo 3 segundos
-            1200000 // timeout 20 minutos
+            3000,
+            1200000
         );
+        console.log(`✅ Tarjetas iniciales cargadas (${initialCards.length})`);
 
-        console.log(`✅ Tarjetas iniciales cargadas (${initialCards.length} tarjetas)`);
-
-        // === BÚSQUEDA DEL BIN ===
+        // === BUSCAR BIN ===
         console.log(`🎯 Escribiendo BIN: ${bin}`);
         await searchInput.click({ clickCount: 3 });
         for (let i = 0; i < 10; i++) await searchInput.press('Backspace');
@@ -204,11 +187,9 @@ async function doPuppeteerSearch(bin) {
 
         const valorActual = await page.evaluate(el => el.value, searchInput);
         if (valorActual !== bin) {
-            console.log(`⚠️ Valor escrito no coincide: ${valorActual} vs ${bin}, corrigiendo...`);
             await searchInput.evaluate((el, val) => { el.value = val; }, bin);
         }
 
-        // Disparar eventos y presionar Enter
         await page.evaluate(() => {
             const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
             if (input) {
@@ -222,47 +203,46 @@ async function doPuppeteerSearch(bin) {
 
         console.log(`✅ BIN ${bin} enviado, esperando resultados...`);
 
-        // === ESPERAR A QUE APAREZCAN TARJETAS CON EL BIN BUSCADO ===
-        console.log('⏳ Esperando resultados de la búsqueda (polling cada 3s)...');
+        // === ESPERAR RESULTADOS DEL BIN (CON ESPERA EXTRA DE 3s) ===
         const targetCards = await waitForCondition(
             page,
             async () => {
                 const text = await getPageText(page);
                 const allCards = extractCardsFromText(text);
-                const matching = allCards.filter(cardStr => {
-                    const parts = cardStr.split('|');
-                    if (parts.length < 1) return false;
-                    const cardNumber = parts[0];
-                    return cardNumber.startsWith(bin);
-                });
+                const matching = allCards.filter(cardStr => cardStr.startsWith(bin));
                 if (matching.length > 0) {
-                    console.log(`🔎 Tarjetas con BIN ${bin} detectadas: ${matching.length}`);
-                    return matching;
+                    console.log(`🔎 Primeras tarjetas con BIN ${bin}: ${matching.length}`);
+                    // Esperar 3 segundos adicionales para que carguen todas
+                    await new Promise(r => setTimeout(r, 3000));
+                    // Volver a extraer
+                    const text2 = await getPageText(page);
+                    const allCards2 = extractCardsFromText(text2);
+                    const matching2 = allCards2.filter(cardStr => cardStr.startsWith(bin));
+                    console.log(`📦 Después de esperar 3s, tarjetas con BIN ${bin}: ${matching2.length}`);
+                    return matching2;
                 }
                 return null;
             },
             3000,
-            1200000 // 20 minutos
+            1200000
         );
 
-        console.log(`✅ Resultados encontrados: ${targetCards.length} tarjetas con BIN ${bin}`);
+        console.log(`✅ Resultados finales: ${targetCards.length} tarjetas con BIN ${bin}`);
 
         // Filtrar vencidas
         const validCards = filterCardsByBinAndExpiry(targetCards, bin);
         console.log(`✅ Después de filtrar vencidas: ${validCards.length}`);
 
         if (validCards.length === 0) {
-            throw new Error(`No se encontraron tarjetas válidas (no vencidas) para el BIN ${bin}`);
+            throw new Error(`No se encontraron tarjetas válidas para el BIN ${bin}`);
         }
 
-        // Convertir años de 2 dígitos a 4 dígitos
+        // Convertir año a 4 dígitos
         const dataWith4DigitYear = validCards.map(cardStr => {
             const parts = cardStr.split('|');
             if (parts.length === 4) {
                 let year = parts[2];
-                if (year.length === 2) {
-                    year = "20" + year;
-                }
+                if (year.length === 2) year = "20" + year;
                 parts[2] = year;
                 return parts.join('|');
             }
@@ -278,7 +258,7 @@ async function doPuppeteerSearch(bin) {
         };
 
     } catch (error) {
-        console.error(`❌ Error en búsqueda:`, error.message);
+        console.error(`❌ Error:`, error.message);
         throw error;
     } finally {
         if (browser) await browser.close().catch(console.error);
