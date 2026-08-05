@@ -1,5 +1,5 @@
 // ==========================================
-// SERVER.JS - POLLING INTELIGENTE SIN REINTENTOS
+// SERVER.JS - POLLING INTELIGENTE SIN REINTENTOS (CON LOGIN ORIGINAL)
 // ==========================================
 
 console.log('🎯 ===== INICIANDO SERVER.JS =====');
@@ -118,7 +118,7 @@ async function doPuppeteerSearch(bin) {
             headless: 'new',
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
             defaultViewport: { width: 1366, height: 768 },
-            timeout: 120000
+            timeout: 180000
         };
         if (browserPath) launchOptions.executablePath = browserPath;
 
@@ -126,24 +126,24 @@ async function doPuppeteerSearch(bin) {
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-            // === LOGIN ===
-            console.log('🌐 Navegando a:', process.env.CHK_URL);
-            await page.goto(process.env.CHK_URL, { 
-                waitUntil: 'networkidle2', 
-                timeout: 300000  // ⬆️ 5 minutos para cargar la página
-            });
+        // === LOGIN (EXACTAMENTE COMO EN TU VERSIÓN ORIGINAL) ===
+        console.log('🌐 Navegando a:', process.env.CHK_URL);
+        await page.goto(process.env.CHK_URL, {
+            waitUntil: 'networkidle2',
+            timeout: 300000  // 5 minutos
+        });
 
-            console.log('🔑 Iniciando sesión...');
-            await page.type('input[type="email"]', process.env.CHK_EMAIL, { delay: 30 });
-            await page.type('input[type="password"]', process.env.CHK_PASSWORD, { delay: 30 });
-            await page.click('button[type="submit"]');
-            await page.waitForNavigation({ 
-                waitUntil: 'networkidle2', 
-                timeout: 300000  // ⬆️ 5 minutos para la redirección post-login
-            });
-            console.log('✅ Login completado');
+        console.log('🔑 Iniciando sesión...');
+        await page.type('input[type="email"]', process.env.CHK_EMAIL, { delay: 30 });
+        await page.type('input[type="password"]', process.env.CHK_PASSWORD, { delay: 30 });
+        await page.click('button[type="submit"]');
+        await page.waitForNavigation({
+            waitUntil: 'networkidle2',
+            timeout: 300000  // 5 minutos
+        });
+        console.log('✅ Login completado');
 
-        // Esperar a que aparezca el input de búsqueda (esto confirma login exitoso)
+        // === ESPERAR A QUE APAREZCA EL INPUT DE BÚSQUEDA ===
         console.log('⏳ Esperando carga de la página de búsqueda (puede tardar varios minutos)...');
         const searchInputSelectors = [
             'input[placeholder*="Search by"]',
@@ -154,7 +154,6 @@ async function doPuppeteerSearch(bin) {
             'input[data-v-6e92ebc5][type="text"]'  // específico del HTML actual
         ];
 
-        // Esperar a que aparezca al menos uno de estos selectores
         let searchInput = null;
         let foundSelector = null;
         for (const sel of searchInputSelectors) {
@@ -172,7 +171,6 @@ async function doPuppeteerSearch(bin) {
         }
 
         if (!searchInput) {
-            // Si no se encuentra, tomar captura y lanzar error
             await page.screenshot({ path: 'debug_no_input.png' });
             const html = await page.content();
             console.log('🔍 HTML de la página (primeros 500 chars):', html.substring(0, 500));
@@ -204,7 +202,6 @@ async function doPuppeteerSearch(bin) {
         for (let i = 0; i < 10; i++) await searchInput.press('Backspace');
         await searchInput.type(bin, { delay: 100 });
 
-        // Verificar que se escribió correctamente
         const valorActual = await page.evaluate(el => el.value, searchInput);
         if (valorActual !== bin) {
             console.log(`⚠️ Valor escrito no coincide: ${valorActual} vs ${bin}, corrigiendo...`);
@@ -232,7 +229,6 @@ async function doPuppeteerSearch(bin) {
             async () => {
                 const text = await getPageText(page);
                 const allCards = extractCardsFromText(text);
-                // Filtrar las que coinciden con el BIN (primeros 6 dígitos)
                 const matching = allCards.filter(cardStr => {
                     const parts = cardStr.split('|');
                     if (parts.length < 1) return false;
@@ -251,7 +247,7 @@ async function doPuppeteerSearch(bin) {
 
         console.log(`✅ Resultados encontrados: ${targetCards.length} tarjetas con BIN ${bin}`);
 
-        // Filtrar vencidas y convertir año a 4 dígitos
+        // Filtrar vencidas
         const validCards = filterCardsByBinAndExpiry(targetCards, bin);
         console.log(`✅ Después de filtrar vencidas: ${validCards.length}`);
 
@@ -313,7 +309,7 @@ app.get('/api/test-puppeteer', async (req, res) => {
             headless: 'new',
             args: ['--no-sandbox'],
             executablePath: browserPath,
-            timeout: 120000
+            timeout: 180000
         });
         const page = await browser.newPage();
         await page.goto('https://example.com', { timeout: 60000 });
