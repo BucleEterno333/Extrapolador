@@ -213,7 +213,7 @@ async function doPuppeteerSearch(bin) {
                 if (matching.length > 0) {
                     console.log(`🔎 Primeras tarjetas con BIN ${bin}: ${matching.length}`);
                     // Esperar 3 segundos adicionales para que carguen todas
-                    await new Promise(r => setTimeout(r, 3000));
+                    await new Promise(r => setTimeout(r, 5000));
                     // Volver a extraer
                     const text2 = await getPageText(page);
                     const allCards2 = extractCardsFromText(text2);
