@@ -203,7 +203,7 @@ async function doPuppeteerSearch(bin) {
 
         console.log(`✅ BIN ${bin} enviado, esperando resultados...`);
 
-        // === ESPERAR RESULTADOS DEL BIN (CON ESPERA EXTRA DE 3s) ===
+        // === ESPERAR RESULTADOS DEL BIN (CON ESPERA EXTRA DE 5s) ===
         const targetCards = await waitForCondition(
             page,
             async () => {
@@ -212,13 +212,13 @@ async function doPuppeteerSearch(bin) {
                 const matching = allCards.filter(cardStr => cardStr.startsWith(bin));
                 if (matching.length > 0) {
                     console.log(`🔎 Primeras tarjetas con BIN ${bin}: ${matching.length}`);
-                    // Esperar 3 segundos adicionales para que carguen todas
+                    // Esperar 5 segundos adicionales para que carguen todas
                     await new Promise(r => setTimeout(r, 5000));
                     // Volver a extraer
                     const text2 = await getPageText(page);
                     const allCards2 = extractCardsFromText(text2);
                     const matching2 = allCards2.filter(cardStr => cardStr.startsWith(bin));
-                    console.log(`📦 Después de esperar 3s, tarjetas con BIN ${bin}: ${matching2.length}`);
+                    console.log(`📦 Después de esperar 5s, tarjetas con BIN ${bin}: ${matching2.length}`);
                     return matching2;
                 }
                 return null;
