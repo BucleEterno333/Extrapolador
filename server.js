@@ -265,8 +265,9 @@ async function doPuppeteerSearch(bin) {
     }
 }
 
-// Ruta de búsqueda
+// Ruta de búsquedaa
 app.post('/api/search-bin', async (req, res) => {
+    req.setTimeout(1200000);
     const { bin } = req.body;
     if (!bin || bin.length !== 6) {
         return res.status(400).json({ error: 'BIN debe tener exactamente 6 dígitos' });
@@ -302,6 +303,10 @@ app.get('/api/test-puppeteer', async (req, res) => {
     }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Servidor en puerto ${PORT}`);
 });
+
+server.timeout = 1200000;
+server.keepAliveTimeout = 1200000;
+server.headersTimeout = 1200000;
