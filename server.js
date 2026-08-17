@@ -1,5 +1,5 @@
 // ==========================================
-// SERVER.JS - POLLING INTELIGENTE + ESPERA EXTRA TRAS DETECCIÓN
+// SERVER.JS - OPTIMIZADO: ESPERA INICIAL + POLLING RÁPIDO
 // ==========================================
 
 console.log('🎯 ===== INICIANDO SERVER.JS =====');
@@ -84,21 +84,6 @@ async function getPageText(page) {
     return await page.evaluate(() => document.body.innerText);
 }
 
-async function waitForCondition(page, checkFn, intervalMs = 3000, timeoutMs = 1200000) {
-    const start = Date.now();
-    let lastResult = null;
-    while (Date.now() - start < timeoutMs) {
-        lastResult = await checkFn();
-        if (lastResult) {
-            console.log(`✅ Condición cumplida después de ${Date.now() - start}ms`);
-            return lastResult;
-        }
-        console.log(`⏳ Esperando ${intervalMs}ms... (${Math.round((Date.now() - start) / 1000)}s)`);
-        await new Promise(r => setTimeout(r, intervalMs));
-    }
-    throw new Error(`Timeout de ${timeoutMs / 1000}s alcanzado esperando condición`);
-}
-
 async function doPuppeteerSearch(bin) {
     console.log(`\n🔍 Iniciando búsqueda para BIN: ${bin}`);
     let browser;
@@ -116,7 +101,7 @@ async function doPuppeteerSearch(bin) {
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-        // === LOGIN (usando domcontentloaded para mayor velocidad) ===
+        // === LOGIN ===
         console.log('🌐 Navegando a:', process.env.CHK_URL);
         await page.goto(process.env.CHK_URL, {
             waitUntil: 'domcontentloaded',
@@ -161,25 +146,11 @@ async function doPuppeteerSearch(bin) {
             throw new Error('No se encontró el input de búsqueda');
         }
 
-        // === ESPERAR TARJETAS INICIALES ===
-        console.log('⏳ Esperando tarjetas iniciales (polling cada 3s)...');
-        const initialCards = await waitForCondition(
-            page,
-            async () => {
-                const text = await getPageText(page);
-                const cards = extractCardsFromText(text);
-                if (cards.length > 0) {
-                    console.log(`🔎 Tarjetas iniciales: ${cards.length}`);
-                    return cards;
-                }
-                return null;
-            },
-            3000,
-            1200000
-        );
-        console.log(`✅ Tarjetas iniciales cargadas (${initialCards.length})`);
+        // === ESPERA INICIAL DE 60 SEGUNDOS (para que carguen tarjetas aleatorias) ===
+        console.log('⏳ Esperando 60 segundos para carga inicial de tarjetas aleatorias...');
+        await new Promise(r => setTimeout(r, 60000));
 
-        // === BUSCAR BIN ===
+        // === ESCRIBIR BIN Y DISPARAR BÚSQUEDA ===
         console.log(`🎯 Escribiendo BIN: ${bin}`);
         await searchInput.click({ clickCount: 3 });
         for (let i = 0; i < 10; i++) await searchInput.press('Backspace');
@@ -203,29 +174,37 @@ async function doPuppeteerSearch(bin) {
 
         console.log(`✅ BIN ${bin} enviado, esperando resultados...`);
 
-        // === ESPERAR RESULTADOS DEL BIN (CON ESPERA EXTRA DE 5s) ===
-        const targetCards = await waitForCondition(
-            page,
-            async () => {
-                const text = await getPageText(page);
-                const allCards = extractCardsFromText(text);
-                const matching = allCards.filter(cardStr => cardStr.startsWith(bin));
-                if (matching.length > 0) {
-                    console.log(`🔎 Primeras tarjetas con BIN ${bin}: ${matching.length}`);
-                    // Esperar 5 segundos adicionales para que carguen todas
-                    await new Promise(r => setTimeout(r, 5000));
-                    // Volver a extraer
-                    const text2 = await getPageText(page);
-                    const allCards2 = extractCardsFromText(text2);
-                    const matching2 = allCards2.filter(cardStr => cardStr.startsWith(bin));
-                    console.log(`📦 Después de esperar 5s, tarjetas con BIN ${bin}: ${matching2.length}`);
-                    return matching2;
-                }
-                return null;
-            },
-            3000,
-            1200000
-        );
+        // === POLLING PARA DETECTAR CAMBIO DE RESULTADOS ===
+        const MAX_POLLING_TIME = 600000; // 10 minutos máximo
+        const startTime = Date.now();
+        let resultsFound = false;
+        let targetCards = [];
+
+        while (Date.now() - startTime < MAX_POLLING_TIME) {
+            const text = await getPageText(page);
+            const allCards = extractCardsFromText(text);
+            // Verificar si hay al menos una tarjeta que coincida con el BIN
+            const matching = allCards.filter(cardStr => cardStr.startsWith(bin));
+            if (matching.length > 0) {
+                console.log(`🔎 Primeras tarjetas con BIN ${bin} detectadas: ${matching.length}`);
+                resultsFound = true;
+                // Esperar 5 segundos adicionales para que carguen todas
+                await new Promise(r => setTimeout(r, 5000));
+                // Volver a extraer
+                const text2 = await getPageText(page);
+                const allCards2 = extractCardsFromText(text2);
+                targetCards = allCards2.filter(cardStr => cardStr.startsWith(bin));
+                console.log(`📦 Después de esperar 5s, tarjetas con BIN ${bin}: ${targetCards.length}`);
+                break;
+            }
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            console.log(`⏳ Esperando resultados (${elapsed}s)...`);
+            await new Promise(r => setTimeout(r, 3000));
+        }
+
+        if (!resultsFound) {
+            throw new Error(`No se encontraron tarjetas para el BIN ${bin} después de ${MAX_POLLING_TIME/1000} segundos`);
+        }
 
         console.log(`✅ Resultados finales: ${targetCards.length} tarjetas con BIN ${bin}`);
 
@@ -265,9 +244,9 @@ async function doPuppeteerSearch(bin) {
     }
 }
 
-// Ruta de búsquedaa
+// Ruta de búsqueda con timeout extendido
 app.post('/api/search-bin', async (req, res) => {
-    req.setTimeout(1200000);
+    req.setTimeout(1200000); // 20 minutos
     const { bin } = req.body;
     if (!bin || bin.length !== 6) {
         return res.status(400).json({ error: 'BIN debe tener exactamente 6 dígitos' });
