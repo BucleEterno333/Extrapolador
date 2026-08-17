@@ -1,5 +1,5 @@
 // ==========================================
-// SERVER.JS - OPTIMIZADO: ESPERA INICIAL + POLLING RÁPIDO
+// SERVER.JS - EXTRACCIÓN INMEDIATA CON POLLING DE 1s Y ESPERA FINAL DE 2s
 // ==========================================
 
 console.log('🎯 ===== INICIANDO SERVER.JS =====');
@@ -146,12 +146,8 @@ async function doPuppeteerSearch(bin) {
             throw new Error('No se encontró el input de búsqueda');
         }
 
-        // === ESPERA INICIAL DE 60 SEGUNDOS (para que carguen tarjetas aleatorias) ===
-        console.log('⏳ Esperando 60 segundos para carga inicial de tarjetas aleatorias...');
-        await new Promise(r => setTimeout(r, 60000));
-
-        // === ESCRIBIR BIN Y DISPARAR BÚSQUEDA ===
-        console.log(`🎯 Escribiendo BIN: ${bin}`);
+        // === ESCRIBIR BIN INMEDIATAMENTE ===
+        console.log(`🎯 Escribiendo BIN: ${bin} (inmediatamente)`);
         await searchInput.click({ clickCount: 3 });
         for (let i = 0; i < 10; i++) await searchInput.press('Backspace');
         await searchInput.type(bin, { delay: 100 });
@@ -172,37 +168,35 @@ async function doPuppeteerSearch(bin) {
         });
         await searchInput.press('Enter');
 
-        console.log(`✅ BIN ${bin} enviado, esperando resultados...`);
+        console.log(`✅ BIN ${bin} enviado, iniciando polling cada 1s...`);
 
-        // === POLLING PARA DETECTAR CAMBIO DE RESULTADOS ===
+        // === POLLING RÁPIDO (1s) DETECTANDO PRIMERA TARJETA DEL BIN ===
         const MAX_POLLING_TIME = 600000; // 10 minutos máximo
         const startTime = Date.now();
-        let resultsFound = false;
         let targetCards = [];
 
         while (Date.now() - startTime < MAX_POLLING_TIME) {
             const text = await getPageText(page);
             const allCards = extractCardsFromText(text);
-            // Verificar si hay al menos una tarjeta que coincida con el BIN
             const matching = allCards.filter(cardStr => cardStr.startsWith(bin));
             if (matching.length > 0) {
                 console.log(`🔎 Primeras tarjetas con BIN ${bin} detectadas: ${matching.length}`);
-                resultsFound = true;
-                // Esperar 5 segundos adicionales para que carguen todas
-                await new Promise(r => setTimeout(r, 5000));
-                // Volver a extraer
+                // Esperar 2 segundos para que carguen todas
+                console.log('⏳ Esperando 2s para que carguen el resto...');
+                await new Promise(r => setTimeout(r, 2000));
+                // Extraer nuevamente
                 const text2 = await getPageText(page);
                 const allCards2 = extractCardsFromText(text2);
                 targetCards = allCards2.filter(cardStr => cardStr.startsWith(bin));
-                console.log(`📦 Después de esperar 5s, tarjetas con BIN ${bin}: ${targetCards.length}`);
+                console.log(`📦 Después de esperar 2s, tarjetas con BIN ${bin}: ${targetCards.length}`);
                 break;
             }
             const elapsed = Math.round((Date.now() - startTime) / 1000);
             console.log(`⏳ Esperando resultados (${elapsed}s)...`);
-            await new Promise(r => setTimeout(r, 3000));
+            await new Promise(r => setTimeout(r, 1000));
         }
 
-        if (!resultsFound) {
+        if (targetCards.length === 0) {
             throw new Error(`No se encontraron tarjetas para el BIN ${bin} después de ${MAX_POLLING_TIME/1000} segundos`);
         }
 
