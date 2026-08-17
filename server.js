@@ -1,5 +1,5 @@
 // ==========================================
-// SERVER.JS - EXTRACCIÓN INMEDIATA CON POLLING DE 1s Y ESPERA FINAL DE 2s
+// SERVER.JS - ASÍNCRONO PARA EVITAR TIMEOUT DE 5 MIN
 // ==========================================
 
 console.log('🎯 ===== INICIANDO SERVER.JS =====');
@@ -9,6 +9,7 @@ const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
+const crypto = require('crypto');
 
 try { require('dotenv').config(); } catch(e) {}
 
@@ -29,6 +30,21 @@ app.use(express.json());
 app.get('/health', (req, res) => res.json({ status: 'OK' }));
 app.get('/api/health', (req, res) => res.json({ status: 'healthy' }));
 
+// ===== TASK MANAGEMENT =====
+const tasks = new Map(); // taskId -> { status, result, error, startedAt, bin }
+
+// Limpiar tareas antiguas cada 10 minutos (mayores a 30 minutos)
+setInterval(() => {
+    const now = Date.now();
+    for (const [id, task] of tasks) {
+        if (now - task.startedAt > 30 * 60 * 1000) {
+            tasks.delete(id);
+            console.log(`🧹 Tarea ${id} eliminada por antigüedad`);
+        }
+    }
+}, 10 * 60 * 1000);
+
+// ===== FUNCIONES DE PUPPETEER (igual que antes) =====
 async function findBrowser() {
     const envPath = process.env.PUPPETEER_EXECUTABLE_PATH;
     if (envPath && fs.existsSync(envPath)) return envPath;
@@ -146,8 +162,12 @@ async function doPuppeteerSearch(bin) {
             throw new Error('No se encontró el input de búsqueda');
         }
 
-        // === ESCRIBIR BIN INMEDIATAMENTE ===
-        console.log(`🎯 Escribiendo BIN: ${bin} (inmediatamente)`);
+        // === ESPERA INICIAL DE 60 SEGUNDOS (para que carguen tarjetas aleatorias) ===
+        console.log('⏳ Esperando 60 segundos para carga inicial de tarjetas aleatorias...');
+        await new Promise(r => setTimeout(r, 60000));
+
+        // === ESCRIBIR BIN Y DISPARAR BÚSQUEDA ===
+        console.log(`🎯 Escribiendo BIN: ${bin}`);
         await searchInput.click({ clickCount: 3 });
         for (let i = 0; i < 10; i++) await searchInput.press('Backspace');
         await searchInput.type(bin, { delay: 100 });
@@ -168,11 +188,12 @@ async function doPuppeteerSearch(bin) {
         });
         await searchInput.press('Enter');
 
-        console.log(`✅ BIN ${bin} enviado, iniciando polling cada 1s...`);
+        console.log(`✅ BIN ${bin} enviado, esperando resultados...`);
 
-        // === POLLING RÁPIDO (1s) DETECTANDO PRIMERA TARJETA DEL BIN ===
-        const MAX_POLLING_TIME = 600000; // 10 minutos máximo
+        // === POLLING PARA DETECTAR RESULTADOS (máximo 5 minutos) ===
+        const MAX_POLLING_TIME = 300000; // 5 minutos
         const startTime = Date.now();
+        let resultsFound = false;
         let targetCards = [];
 
         while (Date.now() - startTime < MAX_POLLING_TIME) {
@@ -181,10 +202,10 @@ async function doPuppeteerSearch(bin) {
             const matching = allCards.filter(cardStr => cardStr.startsWith(bin));
             if (matching.length > 0) {
                 console.log(`🔎 Primeras tarjetas con BIN ${bin} detectadas: ${matching.length}`);
-                // Esperar 2 segundos para que carguen todas
-                console.log('⏳ Esperando 2s para que carguen el resto...');
+                resultsFound = true;
+                // Esperar 2 segundos adicionales para que carguen todas
                 await new Promise(r => setTimeout(r, 2000));
-                // Extraer nuevamente
+                // Volver a extraer
                 const text2 = await getPageText(page);
                 const allCards2 = extractCardsFromText(text2);
                 targetCards = allCards2.filter(cardStr => cardStr.startsWith(bin));
@@ -193,10 +214,10 @@ async function doPuppeteerSearch(bin) {
             }
             const elapsed = Math.round((Date.now() - startTime) / 1000);
             console.log(`⏳ Esperando resultados (${elapsed}s)...`);
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, 3000));
         }
 
-        if (targetCards.length === 0) {
+        if (!resultsFound) {
             throw new Error(`No se encontraron tarjetas para el BIN ${bin} después de ${MAX_POLLING_TIME/1000} segundos`);
         }
 
@@ -238,9 +259,78 @@ async function doPuppeteerSearch(bin) {
     }
 }
 
-// Ruta de búsqueda con timeout extendido
+// ===== RUTAS ASÍNCRONAS =====
+
+// Iniciar búsqueda en background
+app.post('/api/search-bin/async', async (req, res) => {
+    const { bin } = req.body;
+    if (!bin || bin.length !== 6) {
+        return res.status(400).json({ error: 'BIN debe tener exactamente 6 dígitos' });
+    }
+
+    const taskId = crypto.randomBytes(8).toString('hex');
+    console.log(`📌 Creando tarea ${taskId} para BIN ${bin}`);
+
+    // Guardar estado inicial
+    tasks.set(taskId, {
+        status: 'pending',
+        result: null,
+        error: null,
+        startedAt: Date.now(),
+        bin: bin
+    });
+
+    // Iniciar la tarea en segundo plano (sin await)
+    doPuppeteerSearch(bin)
+        .then(result => {
+            const task = tasks.get(taskId);
+            if (task) {
+                task.status = 'done';
+                task.result = result;
+                console.log(`✅ Tarea ${taskId} completada`);
+            }
+        })
+        .catch(error => {
+            const task = tasks.get(taskId);
+            if (task) {
+                task.status = 'error';
+                task.error = error.message;
+                console.error(`❌ Tarea ${taskId} falló: ${error.message}`);
+            }
+        });
+
+    // Devolver taskId inmediatamente
+    res.json({ taskId, status: 'pending' });
+});
+
+// Consultar estado/resultado de una tarea
+app.get('/api/search-bin/result/:taskId', (req, res) => {
+    const { taskId } = req.params;
+    const task = tasks.get(taskId);
+    if (!task) {
+        return res.status(404).json({ error: 'Tarea no encontrada' });
+    }
+
+    // Si está completada o con error, podemos eliminar la tarea después de devolverla (opcional)
+    const response = {
+        taskId,
+        status: task.status,
+        bin: task.bin
+    };
+    if (task.status === 'done') {
+        response.result = task.result;
+        // Opcional: eliminar tarea para ahorrar memoria después de entregar resultado
+        // tasks.delete(taskId);
+    } else if (task.status === 'error') {
+        response.error = task.error;
+        // tasks.delete(taskId);
+    }
+    res.json(response);
+});
+
+// Ruta síncrona (por compatibilidad, pero ya no debería usarse)
 app.post('/api/search-bin', async (req, res) => {
-    req.setTimeout(1200000); // 20 minutos
+    req.setTimeout(1200000);
     const { bin } = req.body;
     if (!bin || bin.length !== 6) {
         return res.status(400).json({ error: 'BIN debe tener exactamente 6 dígitos' });
