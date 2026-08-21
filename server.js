@@ -389,6 +389,55 @@ app.post('/api/search-bin', async (req, res) => {
     processQueue();
 });
 
+
+// ========== SISTEMA DE TAREAS ASÍNCRONAS ==========
+const tasks = new Map(); // taskId -> { status, result, error, startTime }
+
+// Generar ID único
+function generateTaskId() {
+    return Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+}
+
+// Endpoint para iniciar tarea
+app.post('/api/search-bin/async', async (req, res) => {
+    const { bin } = req.body;
+    if (!bin || bin.length !== 6) {
+        return res.status(400).json({ error: 'BIN debe tener exactamente 6 dígitos' });
+    }
+
+    const taskId = generateTaskId();
+    tasks.set(taskId, { status: 'pending', result: null, error: null, startTime: Date.now() });
+
+    // Iniciar la búsqueda en segundo plano (sin esperar)
+    (async () => {
+        try {
+            const result = await performSearch(bin);
+            tasks.set(taskId, { status: 'done', result, error: null, startTime: tasks.get(taskId).startTime });
+        } catch (error) {
+            tasks.set(taskId, { status: 'error', result: null, error: error.message, startTime: tasks.get(taskId).startTime });
+        }
+    })();
+
+    res.json({ taskId, status: 'pending' });
+});
+
+// Endpoint para consultar resultado
+app.get('/api/search-bin/result/:taskId', async (req, res) => {
+    const { taskId } = req.params;
+    const task = tasks.get(taskId);
+    if (!task) {
+        return res.status(404).json({ error: 'Tarea no encontrada' });
+    }
+
+    // Limpiar tareas viejas (más de 30 minutos)
+    if (Date.now() - task.startTime > 1800000) {
+        tasks.delete(taskId);
+        return res.status(404).json({ error: 'Tarea expirada' });
+    }
+
+    res.json({ status: task.status, result: task.result, error: task.error });
+});
+
 // ========== RUTA DE PRUEBA ==========
 app.get('/api/test-puppeteer', async (req, res) => {
     try {
