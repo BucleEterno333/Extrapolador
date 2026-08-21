@@ -20,7 +20,7 @@ app.use(cors({
         'https://astralchk.com',
         'http://localhost:3000',
         'http://127.0.0.1:5500',
-        'https://p01--extrapolador--jbrg9jvfl7cz.code.run'
+        'https://p01--extrapoladorrapido--ymf4hnxpvjhd.code.run'
     ],
     credentials: true
 }));
