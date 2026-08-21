@@ -292,7 +292,7 @@ async function performSearch(bin) {
 
     // 5. Polling rápido para detectar resultados (cada 500ms)
     const startTime = Date.now();
-    const MAX_WAIT = 120000; // 2 minutos
+    const MAX_WAIT = 300000; // 5 minutos
     let targetCards = [];
 
     while (Date.now() - startTime < MAX_WAIT) {
