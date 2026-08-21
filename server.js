@@ -1,5 +1,5 @@
 // ==========================================
-// SERVER.JS - NAVEGADOR PERSISTENTE OPTIMIZADO
+// SERVER.JS - NAVEGADOR PERSISTENTE OPTIMIZADO (VERSIÓN RÁPIDA)
 // ==========================================
 
 console.log('🎯 ===== INICIANDO SERVER.JS (MODO PERSISTENTE) =====');
@@ -30,8 +30,9 @@ app.get('/health', (req, res) => res.json({ status: 'OK' }));
 app.get('/api/health', (req, res) => res.json({ status: 'healthy' }));
 
 // ========== CONFIGURACIÓN ==========
-const MAX_SEARCH_TIME = 600000; // 10 minutos para buscar un BIN
+const MAX_SEARCH_TIME = 600000; // 10 minutos
 const KEEPALIVE_INTERVAL = 30000; // 30 segundos
+const MAX_RETRIES = 3; // reintentos para 0 o 1 tarjeta
 
 // ========== VARIABLES GLOBALES ==========
 let browser = null;
@@ -40,7 +41,6 @@ let isReady = false;
 let isProcessing = false;
 let requestQueue = [];
 let keepaliveTimer = null;
-let pageUrl = null;
 
 // ========== FUNCIONES AUXILIARES ==========
 async function findBrowser() {
@@ -121,7 +121,6 @@ async function initBrowser() {
             waitUntil: 'domcontentloaded',
             timeout: 300000
         });
-        pageUrl = process.env.CHK_URL;
 
         console.log('🔑 Iniciando sesión...');
         await page.type('input[type="email"]', process.env.CHK_EMAIL, { delay: 30 });
@@ -162,12 +161,10 @@ async function initBrowser() {
         isReady = true;
         console.log('✅ Navegador listo para recibir peticiones');
 
-        // Iniciar keep-alive
         startKeepAlive();
 
     } catch (error) {
         console.error('❌ Error inicializando navegador:', error.message);
-        // Reintentar después de 10 segundos
         setTimeout(() => {
             console.log('🔄 Reintentando inicialización...');
             initBrowser();
@@ -204,11 +201,8 @@ async function processQueue() {
             if (!isReady || !page) {
                 console.log('⏳ Navegador no listo, reiniciando...');
                 await initBrowser();
-                if (!isReady) {
-                    throw new Error('Navegador no disponible');
-                }
+                if (!isReady) throw new Error('Navegador no disponible');
             }
-
             console.log(`🔍 Procesando BIN: ${bin}`);
             const result = await performSearch(bin);
             res.json(result);
@@ -221,109 +215,13 @@ async function processQueue() {
     isProcessing = false;
 }
 
-// ========== BÚSQUEDA EN LA PÁGINA PERSISTENTE (MEJORADA) ==========
+// ========== BÚSQUEDA OPTIMIZADA CON REINTENTOS ==========
 async function performSearch(bin) {
     console.log(`🎯 Buscando BIN: ${bin}`);
 
-    // 1. Limpiar el input de búsqueda completamente
-    console.log('🧹 Limpiando input...');
-    await page.evaluate(() => {
-        const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
-        if (input) {
-            input.value = '';
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-            input.dispatchEvent(new Event('blur', { bubbles: true }));
-        }
-    });
-
-    // Esperar un momento para que la página reaccione
-    await new Promise(r => setTimeout(r, 500));
-
-    // 2. Encontrar el input de búsqueda
-    const searchInput = await page.$('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
-    if (!searchInput) {
-        throw new Error('Input de búsqueda no encontrado');
-    }
-
-    // 3. Enfocar y escribir el BIN lentamente para que React/Vue detecte cambios
-    await searchInput.click({ clickCount: 3 });
-    await searchInput.press('End');
-    await new Promise(r => setTimeout(r, 200));
-
-    // Escribir cada carácter con eventos input intermedios
-    for (let i = 0; i < bin.length; i++) {
-        await searchInput.type(bin[i], { delay: 80 });
-        await page.evaluate(() => {
-            const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
-            if (input) {
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-        });
-        await new Promise(r => setTimeout(r, 50));
-    }
-
-    // Verificar que el valor sea correcto
-    const valorActual = await page.evaluate(el => el.value, searchInput);
-    if (valorActual !== bin) {
-        console.log(`⚠️ Valor escrito no coincide: ${valorActual} vs ${bin}, forzando...`);
-        await page.evaluate((val) => {
-            const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
-            if (input) {
-                input.value = val;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        }, bin);
-    }
-
-    // 4. Disparar eventos finales y Enter
-    await page.evaluate(() => {
-        const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
-        if (input) {
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
-            input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
-        }
-    });
-    await searchInput.press('Enter');
-
-    console.log(`✅ BIN ${bin} enviado, esperando resultados...`);
-
-    // 5. Polling rápido para detectar resultados (cada 500ms)
-    const startTime = Date.now();
-    const MAX_WAIT = 600000; // 10 minutos
-    let targetCards = [];
-
-    while (Date.now() - startTime < MAX_WAIT) {
-        const text = await getPageText(page);
-        const allCards = extractCardsFromText(text);
-        const matching = allCards.filter(cardStr => cardStr.startsWith(bin));
-        
-        if (matching.length > 0) {
-            console.log(`🔎 Primeras tarjetas con BIN ${bin} detectadas: ${matching.length}`);
-            // Esperar 5 segundos adicionales para que carguen todas
-            await new Promise(r => setTimeout(r, 5000));
-            // Volver a extraer
-            const text2 = await getPageText(page);
-            const allCards2 = extractCardsFromText(text2);
-            targetCards = allCards2.filter(cardStr => cardStr.startsWith(bin));
-            console.log(`📦 Después de esperar 5s, tarjetas con BIN ${bin}: ${targetCards.length}`);
-            break;
-        }
-
-        // Esperar 500ms y continuar
-        await new Promise(r => setTimeout(r, 500));
-        const elapsed = Math.round((Date.now() - startTime) / 1000);
-        if (elapsed % 5 === 0 && elapsed > 0) {
-            console.log(`⏳ Esperando resultados (${elapsed}s)...`);
-        }
-    }
-
-    if (targetCards.length === 0) {
-        // Intentar una segunda vez si no se encontraron resultados
-        console.log(`⚠️ No se encontraron resultados para BIN ${bin}, reintentando...`);
-        // Limpiar input y reintentar
+    // Helper para escribir el BIN en el input
+    async function writeBin(binValue) {
+        // Limpiar input
         await page.evaluate(() => {
             const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
             if (input) {
@@ -332,24 +230,115 @@ async function performSearch(bin) {
                 input.dispatchEvent(new Event('change', { bubbles: true }));
             }
         });
-        await new Promise(r => setTimeout(r, 1000));
-        await searchInput.type(bin, { delay: 80 });
-        await searchInput.press('Enter');
-        await new Promise(r => setTimeout(r, 5000));
+        await new Promise(r => setTimeout(r, 500));
 
-        // Volver a intentar la extracción
-        const textRetry = await getPageText(page);
-        const allCardsRetry = extractCardsFromText(textRetry);
-        targetCards = allCardsRetry.filter(cardStr => cardStr.startsWith(bin));
-        console.log(`🔄 Reintento: ${targetCards.length} tarjetas con BIN ${bin}`);
+        const searchInput = await page.$('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
+        if (!searchInput) throw new Error('Input de búsqueda no encontrado');
+
+        await searchInput.click({ clickCount: 3 });
+        await searchInput.press('End');
+
+        for (let i = 0; i < binValue.length; i++) {
+            await searchInput.type(binValue[i], { delay: 80 });
+            await page.evaluate(() => {
+                const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
+                if (input) input.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+            await new Promise(r => setTimeout(r, 50));
+        }
+
+        const actual = await page.evaluate(el => el.value, searchInput);
+        if (actual !== binValue) {
+            await page.evaluate((val) => {
+                const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
+                if (input) {
+                    input.value = val;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }, binValue);
+        }
+
+        await page.evaluate(() => {
+            const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
+            if (input) {
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+                input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
+            }
+        });
+        await searchInput.press('Enter');
+        console.log(`✅ BIN ${binValue} enviado.`);
+    }
+
+    // Primer envío
+    await writeBin(bin);
+
+    let retryCount = 0;
+    let targetCards = [];
+
+    while (retryCount <= MAX_RETRIES) {
+        const startTime = Date.now();
+        let firstMatch = false;
+        let firstCount = 0;
+
+        // Polling cada 500ms
+        while (Date.now() - startTime < MAX_SEARCH_TIME) {
+            const text = await getPageText(page);
+            const allCards = extractCardsFromText(text);
+            const matching = allCards.filter(cardStr => cardStr.startsWith(bin));
+
+            if (matching.length > 0) {
+                firstMatch = true;
+                firstCount = matching.length;
+                console.log(`🔎 Primeras tarjetas con BIN ${bin} detectadas: ${matching.length}`);
+
+                // Si hay más de 50, devolver inmediatamente
+                if (matching.length > 50) {
+                    targetCards = matching;
+                    console.log(`✅ Detectadas ${targetCards.length} tarjetas, consideramos completas.`);
+                    break;
+                } else {
+                    // Esperar 1 segundo y volver a extraer
+                    await new Promise(r => setTimeout(r, 1000));
+                    const text2 = await getPageText(page);
+                    const allCards2 = extractCardsFromText(text2);
+                    targetCards = allCards2.filter(cardStr => cardStr.startsWith(bin));
+                    console.log(`📦 Después de esperar 1s, tarjetas con BIN ${bin}: ${targetCards.length}`);
+                    break;
+                }
+            }
+
+            await new Promise(r => setTimeout(r, 500));
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            if (elapsed % 5 === 0 && elapsed > 0) {
+                console.log(`⏳ Esperando resultados (${elapsed}s)...`);
+            }
+        }
+
+        // Si se encontraron tarjetas y (más de 1 o es el último reintento) -> devolver
+        if (targetCards.length > 1 || retryCount === MAX_RETRIES) {
+            break;
+        }
+
+        // Si no hay tarjetas o solo 1 y no es el último reintento, reintentar
+        if (targetCards.length <= 1 && retryCount < MAX_RETRIES) {
+            retryCount++;
+            console.log(`⚠️ Solo ${targetCards.length} tarjeta(s) (intento ${retryCount}/${MAX_RETRIES}). Reintentando...`);
+            // Limpiar y reenviar
+            await writeBin(bin);
+            targetCards = []; // reset
+        } else {
+            break;
+        }
     }
 
     if (targetCards.length === 0) {
         await page.screenshot({ path: `debug_no_results_${bin}.png` });
-        throw new Error(`No se encontraron tarjetas para el BIN ${bin} en ${MAX_WAIT/1000} segundos`);
+        throw new Error(`No se encontraron tarjetas para el BIN ${bin} después de reintentos.`);
     }
 
-    // 6. Procesar resultados (filtrar vencidas, convertir año)
+    // Procesar resultados
     const validCards = filterCardsByBinAndExpiry(targetCards, bin);
     console.log(`✅ Después de filtrar vencidas: ${validCards.length}`);
 
@@ -377,28 +366,24 @@ async function performSearch(bin) {
     };
 }
 
-// ========== RUTA DE BÚSQUEDA ==========
+// ========== RUTA SÍNCRONA (respaldo) ==========
 app.post('/api/search-bin', async (req, res) => {
     req.setTimeout(1200000);
     const { bin } = req.body;
     if (!bin || bin.length !== 6) {
         return res.status(400).json({ error: 'BIN debe tener exactamente 6 dígitos' });
     }
-
     requestQueue.push({ req, res, bin });
     processQueue();
 });
 
-
 // ========== SISTEMA DE TAREAS ASÍNCRONAS ==========
-const tasks = new Map(); // taskId -> { status, result, error, startTime }
+const tasks = new Map();
 
-// Generar ID único
 function generateTaskId() {
     return Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
 }
 
-// Endpoint para iniciar tarea
 app.post('/api/search-bin/async', async (req, res) => {
     const { bin } = req.body;
     if (!bin || bin.length !== 6) {
@@ -408,7 +393,6 @@ app.post('/api/search-bin/async', async (req, res) => {
     const taskId = generateTaskId();
     tasks.set(taskId, { status: 'pending', result: null, error: null, startTime: Date.now() });
 
-    // Iniciar la búsqueda en segundo plano (sin esperar)
     (async () => {
         try {
             const result = await performSearch(bin);
@@ -421,24 +405,20 @@ app.post('/api/search-bin/async', async (req, res) => {
     res.json({ taskId, status: 'pending' });
 });
 
-// Endpoint para consultar resultado
 app.get('/api/search-bin/result/:taskId', async (req, res) => {
     const { taskId } = req.params;
     const task = tasks.get(taskId);
     if (!task) {
         return res.status(404).json({ error: 'Tarea no encontrada' });
     }
-
-    // Limpiar tareas viejas (más de 30 minutos)
     if (Date.now() - task.startTime > 1800000) {
         tasks.delete(taskId);
         return res.status(404).json({ error: 'Tarea expirada' });
     }
-
     res.json({ status: task.status, result: task.result, error: task.error });
 });
 
-// ========== RUTA DE PRUEBA ==========
+// ========== PRUEBA ==========
 app.get('/api/test-puppeteer', async (req, res) => {
     try {
         if (isReady && page) {
@@ -462,4 +442,4 @@ server.timeout = 1200000;
 server.keepAliveTimeout = 1200000;
 server.headersTimeout = 1200000;
 
-console.log('✅ Servidor listo con navegador persistente');
+console.log('✅ Servidor listo con navegador persistente (modo rápido)');
