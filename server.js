@@ -1,5 +1,5 @@
 // ==========================================
-// SERVER.JS - NAVEGADOR PERSISTENTE + COLA DE PETICIONES
+// SERVER.JS - NAVEGADOR PERSISTENTE OPTIMIZADO
 // ==========================================
 
 console.log('🎯 ===== INICIANDO SERVER.JS (MODO PERSISTENTE) =====');
@@ -30,7 +30,7 @@ app.get('/health', (req, res) => res.json({ status: 'OK' }));
 app.get('/api/health', (req, res) => res.json({ status: 'healthy' }));
 
 // ========== CONFIGURACIÓN ==========
-const MAX_SEARCH_TIME = 300000; // 5 minutos para buscar un BIN
+const MAX_SEARCH_TIME = 180000; // 3 minutos para buscar un BIN
 const KEEPALIVE_INTERVAL = 30000; // 30 segundos
 
 // ========== VARIABLES GLOBALES ==========
@@ -40,6 +40,7 @@ let isReady = false;
 let isProcessing = false;
 let requestQueue = [];
 let keepaliveTimer = null;
+let pageUrl = null;
 
 // ========== FUNCIONES AUXILIARES ==========
 async function findBrowser() {
@@ -120,6 +121,7 @@ async function initBrowser() {
             waitUntil: 'domcontentloaded',
             timeout: 300000
         });
+        pageUrl = process.env.CHK_URL;
 
         console.log('🔑 Iniciando sesión...');
         await page.type('input[type="email"]', process.env.CHK_EMAIL, { delay: 30 });
@@ -179,11 +181,7 @@ function startKeepAlive() {
     keepaliveTimer = setInterval(async () => {
         try {
             if (page && isReady) {
-                // Hacer una acción ligera para mantener la sesión activa
-                await page.evaluate(() => {
-                    // Solo evaluar algo simple
-                    return document.title;
-                });
+                await page.evaluate(() => document.title);
                 console.log('💓 Keep-alive ejecutado');
             }
         } catch (error) {
@@ -203,7 +201,6 @@ async function processQueue() {
     while (requestQueue.length > 0) {
         const { req, res, bin } = requestQueue.shift();
         try {
-            // Asegurar que el navegador esté listo
             if (!isReady || !page) {
                 console.log('⏳ Navegador no listo, reiniciando...');
                 await initBrowser();
@@ -212,7 +209,6 @@ async function processQueue() {
                 }
             }
 
-            // Ejecutar búsqueda
             console.log(`🔍 Procesando BIN: ${bin}`);
             const result = await performSearch(bin);
             res.json(result);
@@ -225,70 +221,135 @@ async function processQueue() {
     isProcessing = false;
 }
 
-// ========== BÚSQUEDA EN LA PÁGINA PERSISTENTE ==========
+// ========== BÚSQUEDA EN LA PÁGINA PERSISTENTE (MEJORADA) ==========
 async function performSearch(bin) {
     console.log(`🎯 Buscando BIN: ${bin}`);
 
-    // Limpiar input
+    // 1. Limpiar el input de búsqueda completamente
+    console.log('🧹 Limpiando input...');
+    await page.evaluate(() => {
+        const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
+        if (input) {
+            input.value = '';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            input.dispatchEvent(new Event('blur', { bubbles: true }));
+        }
+    });
+
+    // Esperar un momento para que la página reaccione
+    await new Promise(r => setTimeout(r, 500));
+
+    // 2. Encontrar el input de búsqueda
     const searchInput = await page.$('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
     if (!searchInput) {
         throw new Error('Input de búsqueda no encontrado');
     }
 
+    // 3. Enfocar y escribir el BIN lentamente para que React/Vue detecte cambios
     await searchInput.click({ clickCount: 3 });
-    for (let i = 0; i < 10; i++) await searchInput.press('Backspace');
-    await searchInput.type(bin, { delay: 100 });
+    await searchInput.press('End');
+    await new Promise(r => setTimeout(r, 200));
 
-    const valorActual = await page.evaluate(el => el.value, searchInput);
-    if (valorActual !== bin) {
-        await searchInput.evaluate((el, val) => { el.value = val; }, bin);
+    // Escribir cada carácter con eventos input intermedios
+    for (let i = 0; i < bin.length; i++) {
+        await searchInput.type(bin[i], { delay: 80 });
+        await page.evaluate(() => {
+            const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
+            if (input) {
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        });
+        await new Promise(r => setTimeout(r, 50));
     }
 
-    // Disparar eventos y Enter
+    // Verificar que el valor sea correcto
+    const valorActual = await page.evaluate(el => el.value, searchInput);
+    if (valorActual !== bin) {
+        console.log(`⚠️ Valor escrito no coincide: ${valorActual} vs ${bin}, forzando...`);
+        await page.evaluate((val) => {
+            const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
+            if (input) {
+                input.value = val;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }, bin);
+    }
+
+    // 4. Disparar eventos finales y Enter
     await page.evaluate(() => {
         const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
         if (input) {
-            input.dispatchEvent(new Event('input', { bubbles: true }));
             input.dispatchEvent(new Event('change', { bubbles: true }));
-            input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
-            input.dispatchEvent(new Event('blur', { bubbles: true }));
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+            input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
         }
     });
     await searchInput.press('Enter');
 
     console.log(`✅ BIN ${bin} enviado, esperando resultados...`);
 
-    // === POLLING PARA DETECTAR RESULTADOS ===
+    // 5. Polling rápido para detectar resultados (cada 500ms)
     const startTime = Date.now();
+    const MAX_WAIT = 120000; // 2 minutos
     let targetCards = [];
 
-    while (Date.now() - startTime < MAX_SEARCH_TIME) {
+    while (Date.now() - startTime < MAX_WAIT) {
         const text = await getPageText(page);
         const allCards = extractCardsFromText(text);
         const matching = allCards.filter(cardStr => cardStr.startsWith(bin));
-
+        
         if (matching.length > 0) {
-            console.log(`🔎 Tarjetas con BIN ${bin} detectadas: ${matching.length}`);
-            // Esperar 2 segundos adicionales para que carguen todas
-            await new Promise(r => setTimeout(r, 2000));
+            console.log(`🔎 Primeras tarjetas con BIN ${bin} detectadas: ${matching.length}`);
+            // Esperar 3 segundos adicionales para que carguen todas
+            await new Promise(r => setTimeout(r, 3000));
             // Volver a extraer
             const text2 = await getPageText(page);
             const allCards2 = extractCardsFromText(text2);
             targetCards = allCards2.filter(cardStr => cardStr.startsWith(bin));
-            console.log(`📦 Después de esperar 2s, tarjetas con BIN ${bin}: ${targetCards.length}`);
+            console.log(`📦 Después de esperar 3s, tarjetas con BIN ${bin}: ${targetCards.length}`);
             break;
         }
 
+        // Esperar 500ms y continuar
+        await new Promise(r => setTimeout(r, 500));
         const elapsed = Math.round((Date.now() - startTime) / 1000);
-        console.log(`⏳ Esperando resultados (${elapsed}s)...`);
-        await new Promise(r => setTimeout(r, 3000));
+        if (elapsed % 5 === 0 && elapsed > 0) {
+            console.log(`⏳ Esperando resultados (${elapsed}s)...`);
+        }
     }
 
     if (targetCards.length === 0) {
-        throw new Error(`No se encontraron tarjetas para el BIN ${bin} en ${MAX_SEARCH_TIME/1000} segundos`);
+        // Intentar una segunda vez si no se encontraron resultados
+        console.log(`⚠️ No se encontraron resultados para BIN ${bin}, reintentando...`);
+        // Limpiar input y reintentar
+        await page.evaluate(() => {
+            const input = document.querySelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
+            if (input) {
+                input.value = '';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        });
+        await new Promise(r => setTimeout(r, 1000));
+        await searchInput.type(bin, { delay: 80 });
+        await searchInput.press('Enter');
+        await new Promise(r => setTimeout(r, 5000));
+
+        // Volver a intentar la extracción
+        const textRetry = await getPageText(page);
+        const allCardsRetry = extractCardsFromText(textRetry);
+        targetCards = allCardsRetry.filter(cardStr => cardStr.startsWith(bin));
+        console.log(`🔄 Reintento: ${targetCards.length} tarjetas con BIN ${bin}`);
     }
 
-    // Filtrar vencidas
+    if (targetCards.length === 0) {
+        await page.screenshot({ path: `debug_no_results_${bin}.png` });
+        throw new Error(`No se encontraron tarjetas para el BIN ${bin} en ${MAX_WAIT/1000} segundos`);
+    }
+
+    // 6. Procesar resultados (filtrar vencidas, convertir año)
     const validCards = filterCardsByBinAndExpiry(targetCards, bin);
     console.log(`✅ Después de filtrar vencidas: ${validCards.length}`);
 
@@ -296,7 +357,6 @@ async function performSearch(bin) {
         throw new Error(`No se encontraron tarjetas válidas para el BIN ${bin}`);
     }
 
-    // Convertir año a 4 dígitos
     const dataWith4DigitYear = validCards.map(cardStr => {
         const parts = cardStr.split('|');
         if (parts.length === 4) {
@@ -319,12 +379,12 @@ async function performSearch(bin) {
 
 // ========== RUTA DE BÚSQUEDA ==========
 app.post('/api/search-bin', async (req, res) => {
+    req.setTimeout(1200000);
     const { bin } = req.body;
     if (!bin || bin.length !== 6) {
         return res.status(400).json({ error: 'BIN debe tener exactamente 6 dígitos' });
     }
 
-    // Encolar la petición
     requestQueue.push({ req, res, bin });
     processQueue();
 });
@@ -346,7 +406,6 @@ app.get('/api/test-puppeteer', async (req, res) => {
 // ========== INICIAR SERVIDOR ==========
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Servidor en puerto ${PORT}`);
-    // Inicializar el navegador persistente
     initBrowser();
 });
 
