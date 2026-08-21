@@ -302,13 +302,13 @@ async function performSearch(bin) {
         
         if (matching.length > 0) {
             console.log(`🔎 Primeras tarjetas con BIN ${bin} detectadas: ${matching.length}`);
-            // Esperar 3 segundos adicionales para que carguen todas
-            await new Promise(r => setTimeout(r, 3000));
+            // Esperar 5 segundos adicionales para que carguen todas
+            await new Promise(r => setTimeout(r, 5000));
             // Volver a extraer
             const text2 = await getPageText(page);
             const allCards2 = extractCardsFromText(text2);
             targetCards = allCards2.filter(cardStr => cardStr.startsWith(bin));
-            console.log(`📦 Después de esperar 3s, tarjetas con BIN ${bin}: ${targetCards.length}`);
+            console.log(`📦 Después de esperar 5s, tarjetas con BIN ${bin}: ${targetCards.length}`);
             break;
         }
 
