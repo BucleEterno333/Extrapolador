@@ -293,8 +293,8 @@ async function performSearch(bin) {
                 firstCount = matching.length;
                 console.log(`🔎 Primeras tarjetas con BIN ${bin} detectadas: ${matching.length}`);
 
-                // Si hay más de 50, devolver inmediatamente
-                if (matching.length > 50) {
+                // Si hay más de 195, devolver inmediatamente
+                if (matching.length > 195) {
                     targetCards = matching;
                     console.log(`✅ Detectadas ${targetCards.length} tarjetas, consideramos completas.`);
                     break;
