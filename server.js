@@ -30,7 +30,7 @@ app.get('/health', (req, res) => res.json({ status: 'OK' }));
 app.get('/api/health', (req, res) => res.json({ status: 'healthy' }));
 
 // ========== CONFIGURACIÓN ==========
-const MAX_SEARCH_TIME = 180000; // 3 minutos para buscar un BIN
+const MAX_SEARCH_TIME = 300000; // 5 minutos para buscar un BIN
 const KEEPALIVE_INTERVAL = 30000; // 30 segundos
 
 // ========== VARIABLES GLOBALES ==========
