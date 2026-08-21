@@ -30,7 +30,7 @@ app.get('/health', (req, res) => res.json({ status: 'OK' }));
 app.get('/api/health', (req, res) => res.json({ status: 'healthy' }));
 
 // ========== CONFIGURACIÓN ==========
-const MAX_SEARCH_TIME = 180000; // 3 minutos para buscar un BIN
+const MAX_SEARCH_TIME = 600000; // 10 minutos para buscar un BIN
 const KEEPALIVE_INTERVAL = 30000; // 30 segundos
 
 // ========== VARIABLES GLOBALES ==========
@@ -107,7 +107,7 @@ async function initBrowser() {
             headless: 'new',
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
             defaultViewport: { width: 1366, height: 768 },
-            timeout: 180000
+            timeout: 600000
         };
         if (browserPath) launchOptions.executablePath = browserPath;
 
@@ -292,7 +292,7 @@ async function performSearch(bin) {
 
     // 5. Polling rápido para detectar resultados (cada 500ms)
     const startTime = Date.now();
-    const MAX_WAIT = 300000; // 5 minutos
+    const MAX_WAIT = 600000; // 10 minutos
     let targetCards = [];
 
     while (Date.now() - startTime < MAX_WAIT) {
