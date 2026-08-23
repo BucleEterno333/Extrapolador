@@ -32,7 +32,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'healthy' }));
 // ========== CONFIGURACIÓN ==========
 const MAX_SEARCH_TIME = 600000; // 10 minutos
 const KEEPALIVE_INTERVAL = 30000; // 30 segundos
-const MAX_RETRIES = 3; // reintentos para 0 o 1 tarjeta
+const MAX_RETRIES = 3;
 
 // ========== VARIABLES GLOBALES ==========
 let browser = null;
@@ -41,6 +41,7 @@ let isReady = false;
 let isProcessing = false;
 let requestQueue = [];
 let keepaliveTimer = null;
+let initInProgress = false;
 
 // ========== FUNCIONES AUXILIARES ==========
 async function findBrowser() {
@@ -95,13 +96,28 @@ function extractCardsFromText(text) {
 }
 
 async function getPageText(page) {
-    return await page.evaluate(() => document.body.innerText);
+    try {
+        return await page.evaluate(() => document.body.innerText);
+    } catch (error) {
+        if (error.message.includes('Execution context was destroyed')) {
+            console.warn('⚠️ Contexto destruido, reiniciando navegador...');
+            throw new Error('NAVIGATION_RESET');
+        }
+        throw error;
+    }
 }
 
 // ========== INICIALIZAR NAVEGADOR PERSISTENTE ==========
 async function initBrowser() {
+    if (initInProgress) return;
+    initInProgress = true;
     console.log('🔄 Inicializando navegador persistente...');
     try {
+        if (browser) {
+            try { await browser.close(); } catch (e) {}
+            browser = null;
+            page = null;
+        }
         const browserPath = await findBrowser();
         const launchOptions = {
             headless: 'new',
@@ -160,15 +176,17 @@ async function initBrowser() {
 
         isReady = true;
         console.log('✅ Navegador listo para recibir peticiones');
-
         startKeepAlive();
-
     } catch (error) {
         console.error('❌ Error inicializando navegador:', error.message);
+        isReady = false;
+        // Reintentar después de 10 segundos
         setTimeout(() => {
-            console.log('🔄 Reintentando inicialización...');
+            initInProgress = false;
             initBrowser();
         }, 10000);
+    } finally {
+        initInProgress = false;
     }
 }
 
@@ -178,11 +196,17 @@ function startKeepAlive() {
     keepaliveTimer = setInterval(async () => {
         try {
             if (page && isReady) {
-                await page.evaluate(() => document.title);
+                // Verificar que la página aún exista
+                const title = await page.evaluate(() => document.title);
                 console.log('💓 Keep-alive ejecutado');
+            } else {
+                console.warn('⚠️ Keep-alive: página no disponible, reiniciando...');
+                isReady = false;
+                clearInterval(keepaliveTimer);
+                initBrowser();
             }
         } catch (error) {
-            console.warn('⚠️ Keep-alive falló, intentando reiniciar navegador...');
+            console.warn('⚠️ Keep-alive falló:', error.message);
             isReady = false;
             clearInterval(keepaliveTimer);
             initBrowser();
@@ -198,6 +222,7 @@ async function processQueue() {
     while (requestQueue.length > 0) {
         const { req, res, bin } = requestQueue.shift();
         try {
+            // Verificar estado del navegador
             if (!isReady || !page) {
                 console.log('⏳ Navegador no listo, reiniciando...');
                 await initBrowser();
@@ -208,7 +233,21 @@ async function processQueue() {
             res.json(result);
         } catch (error) {
             console.error(`❌ Error procesando BIN ${bin}:`, error.message);
-            res.status(500).json({ success: false, error: error.message });
+            if (error.message === 'NAVIGATION_RESET' || error.message.includes('context destroyed')) {
+                // Reiniciar el navegador y reintentar esta misma petición (ponerla de vuelta en la cola)
+                console.log('🔄 Reiniciando navegador por error de contexto...');
+                isReady = false;
+                await initBrowser();
+                if (isReady) {
+                    requestQueue.unshift({ req, res, bin });
+                    console.log(`↩️ Reintentando BIN ${bin} después de reinicio.`);
+                    continue;
+                } else {
+                    res.status(500).json({ success: false, error: 'Navegador no disponible después de reinicio' });
+                }
+            } else {
+                res.status(500).json({ success: false, error: error.message });
+            }
         }
     }
 
@@ -232,8 +271,16 @@ async function performSearch(bin) {
         });
         await new Promise(r => setTimeout(r, 500));
 
-        const searchInput = await page.$('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
-        if (!searchInput) throw new Error('Input de búsqueda no encontrado');
+        // Asegurar que el input existe
+        let searchInput = await page.$('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
+        if (!searchInput) {
+            // Intentar recargar la página para recuperar el input
+            console.warn('⚠️ Input no encontrado, recargando página...');
+            await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForSelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]', { timeout: 10000 });
+            searchInput = await page.$('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
+            if (!searchInput) throw new Error('Input de búsqueda no encontrado después de recarga');
+        }
 
         await searchInput.click({ clickCount: 3 });
         await searchInput.press('End');
@@ -284,7 +331,15 @@ async function performSearch(bin) {
 
         // Polling cada 500ms
         while (Date.now() - startTime < MAX_SEARCH_TIME) {
-            const text = await getPageText(page);
+            let text;
+            try {
+                text = await getPageText(page);
+            } catch (error) {
+                if (error.message === 'NAVIGATION_RESET' || error.message.includes('context destroyed')) {
+                    throw error; // Propagar para que el manejador lo capture y reinicie
+                }
+                throw error;
+            }
             const allCards = extractCardsFromText(text);
             const matching = allCards.filter(cardStr => cardStr.startsWith(bin));
 
@@ -293,13 +348,11 @@ async function performSearch(bin) {
                 firstCount = matching.length;
                 console.log(`🔎 Primeras tarjetas con BIN ${bin} detectadas: ${matching.length}`);
 
-                // Si hay más de 195, devolver inmediatamente
                 if (matching.length > 195) {
                     targetCards = matching;
                     console.log(`✅ Detectadas ${targetCards.length} tarjetas, consideramos completas.`);
                     break;
                 } else {
-                    // Esperar 1 segundo y volver a extraer
                     await new Promise(r => setTimeout(r, 1000));
                     const text2 = await getPageText(page);
                     const allCards2 = extractCardsFromText(text2);
@@ -316,18 +369,15 @@ async function performSearch(bin) {
             }
         }
 
-        // Si se encontraron tarjetas y (más de 1 o es el último reintento) -> devolver
         if (targetCards.length > 1 || retryCount === MAX_RETRIES) {
             break;
         }
 
-        // Si no hay tarjetas o solo 1 y no es el último reintento, reintentar
         if (targetCards.length <= 1 && retryCount < MAX_RETRIES) {
             retryCount++;
             console.log(`⚠️ Solo ${targetCards.length} tarjeta(s) (intento ${retryCount}/${MAX_RETRIES}). Reintentando...`);
-            // Limpiar y reenviar
             await writeBin(bin);
-            targetCards = []; // reset
+            targetCards = [];
         } else {
             break;
         }
@@ -338,7 +388,6 @@ async function performSearch(bin) {
         throw new Error(`No se encontraron tarjetas para el BIN ${bin} después de reintentos.`);
     }
 
-    // Procesar resultados
     const validCards = filterCardsByBinAndExpiry(targetCards, bin);
     console.log(`✅ Después de filtrar vencidas: ${validCards.length}`);
 
@@ -366,7 +415,7 @@ async function performSearch(bin) {
     };
 }
 
-// ========== RUTA SÍNCRONA (respaldo) ==========
+// ========== RUTAS ==========
 app.post('/api/search-bin', async (req, res) => {
     req.setTimeout(1200000);
     const { bin } = req.body;
@@ -418,7 +467,6 @@ app.get('/api/search-bin/result/:taskId', async (req, res) => {
     res.json({ status: task.status, result: task.result, error: task.error });
 });
 
-// ========== PRUEBA ==========
 app.get('/api/test-puppeteer', async (req, res) => {
     try {
         if (isReady && page) {
