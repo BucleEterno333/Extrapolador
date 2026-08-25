@@ -1,8 +1,8 @@
 // ==========================================
-// SERVER.JS - NAVEGADOR PERSISTENTE OPTIMIZADO (VERSIÓN RÁPIDA)
+// SERVER.JS - NAVEGADOR PERSISTENTE CON REAUTENTICACIÓN
 // ==========================================
 
-console.log('🎯 ===== INICIANDO SERVER.JS (MODO PERSISTENTE) =====');
+console.log('🎯 ===== INICIANDO SERVER.JS (MODO PERSISTENTE CON REAUTENTICACIÓN) =====');
 console.log('📅 Timestamp:', new Date().toISOString());
 
 const fs = require('fs');
@@ -107,6 +107,61 @@ async function getPageText(page) {
     }
 }
 
+// ========== FUNCIÓN DE REAUTENTICACIÓN ==========
+async function reauthenticate() {
+    console.log('🔄 Reautenticando (recargando página y login)...');
+    try {
+        // Navegar a la URL de login
+        await page.goto(process.env.CHK_URL, {
+            waitUntil: 'domcontentloaded',
+            timeout: 120000
+        });
+
+        // Esperar campos de login
+        await page.waitForSelector('input[type="email"]', { timeout: 30000 });
+        await page.waitForSelector('input[type="password"]', { timeout: 30000 });
+
+        console.log('🔑 Iniciando sesión nuevamente...');
+        await page.type('input[type="email"]', process.env.CHK_EMAIL, { delay: 30 });
+        await page.type('input[type="password"]', process.env.CHK_PASSWORD, { delay: 30 });
+        await page.click('button[type="submit"]');
+        await page.waitForNavigation({
+            waitUntil: 'domcontentloaded',
+            timeout: 120000
+        });
+        console.log('✅ Reautenticación completada');
+
+        // Verificar que el input de búsqueda aparezca
+        const searchInputSelectors = [
+            'input[placeholder*="Search by"]',
+            'input[placeholder*="BIN"]',
+            'input[maxlength="6"][type="text"]',
+            'input[data-v-6e92ebc5][type="text"]'
+        ];
+        let found = false;
+        for (const sel of searchInputSelectors) {
+            try {
+                await page.waitForSelector(sel, { timeout: 10000, visible: true });
+                const input = await page.$(sel);
+                if (input) {
+                    console.log(`✅ Input de búsqueda encontrado después de reautenticar: ${sel}`);
+                    found = true;
+                    break;
+                }
+            } catch (e) {}
+        }
+        if (!found) {
+            throw new Error('No se encontró input de búsqueda después de reautenticar');
+        }
+        isReady = true;
+        console.log('✅ Navegador listo después de reautenticación');
+    } catch (error) {
+        console.error('❌ Error en reautenticación:', error.message);
+        isReady = false;
+        throw error;
+    }
+}
+
 // ========== INICIALIZAR NAVEGADOR PERSISTENTE ==========
 async function initBrowser() {
     if (initInProgress) return;
@@ -131,48 +186,8 @@ async function initBrowser() {
         page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-        // === LOGIN ===
-        console.log('🌐 Navegando a:', process.env.CHK_URL);
-        await page.goto(process.env.CHK_URL, {
-            waitUntil: 'domcontentloaded',
-            timeout: 300000
-        });
-
-        console.log('🔑 Iniciando sesión...');
-        await page.type('input[type="email"]', process.env.CHK_EMAIL, { delay: 30 });
-        await page.type('input[type="password"]', process.env.CHK_PASSWORD, { delay: 30 });
-        await page.click('button[type="submit"]');
-        await page.waitForNavigation({
-            waitUntil: 'domcontentloaded',
-            timeout: 300000
-        });
-        console.log('✅ Login completado');
-
-        // === ESPERAR INPUT DE BÚSQUEDA ===
-        console.log('⏳ Esperando carga de la página de búsqueda...');
-        const searchInputSelectors = [
-            'input[placeholder*="Search by"]',
-            'input[placeholder*="BIN"]',
-            'input[maxlength="6"][type="text"]',
-            'input[data-v-6e92ebc5][type="text"]'
-        ];
-
-        let found = false;
-        for (const sel of searchInputSelectors) {
-            try {
-                await page.waitForSelector(sel, { timeout: 10000, visible: true });
-                const input = await page.$(sel);
-                if (input) {
-                    console.log(`✅ Input encontrado con: ${sel}`);
-                    found = true;
-                    break;
-                }
-            } catch (e) {}
-        }
-
-        if (!found) {
-            throw new Error('No se encontró el input de búsqueda');
-        }
+        // Realizar login inicial
+        await reauthenticate();
 
         isReady = true;
         console.log('✅ Navegador listo para recibir peticiones');
@@ -180,7 +195,6 @@ async function initBrowser() {
     } catch (error) {
         console.error('❌ Error inicializando navegador:', error.message);
         isReady = false;
-        // Reintentar después de 10 segundos
         setTimeout(() => {
             initInProgress = false;
             initBrowser();
@@ -196,8 +210,7 @@ function startKeepAlive() {
     keepaliveTimer = setInterval(async () => {
         try {
             if (page && isReady) {
-                // Verificar que la página aún exista
-                const title = await page.evaluate(() => document.title);
+                await page.evaluate(() => document.title);
                 console.log('💓 Keep-alive ejecutado');
             } else {
                 console.warn('⚠️ Keep-alive: página no disponible, reiniciando...');
@@ -222,7 +235,6 @@ async function processQueue() {
     while (requestQueue.length > 0) {
         const { req, res, bin } = requestQueue.shift();
         try {
-            // Verificar estado del navegador
             if (!isReady || !page) {
                 console.log('⏳ Navegador no listo, reiniciando...');
                 await initBrowser();
@@ -234,7 +246,6 @@ async function processQueue() {
         } catch (error) {
             console.error(`❌ Error procesando BIN ${bin}:`, error.message);
             if (error.message === 'NAVIGATION_RESET' || error.message.includes('context destroyed')) {
-                // Reiniciar el navegador y reintentar esta misma petición (ponerla de vuelta en la cola)
                 console.log('🔄 Reiniciando navegador por error de contexto...');
                 isReady = false;
                 await initBrowser();
@@ -244,6 +255,18 @@ async function processQueue() {
                     continue;
                 } else {
                     res.status(500).json({ success: false, error: 'Navegador no disponible después de reinicio' });
+                }
+            } else if (error.message.includes('Input de búsqueda')) {
+                // Si es error de input, intentar reautenticar
+                console.log('🔄 Intentando reautenticación por error de input...');
+                try {
+                    await reauthenticate();
+                    // Reintentar la petición
+                    requestQueue.unshift({ req, res, bin });
+                    console.log(`↩️ Reintentando BIN ${bin} después de reautenticación.`);
+                    continue;
+                } catch (reauthError) {
+                    res.status(500).json({ success: false, error: 'Error de autenticación: ' + reauthError.message });
                 }
             } else {
                 res.status(500).json({ success: false, error: error.message });
@@ -271,15 +294,10 @@ async function performSearch(bin) {
         });
         await new Promise(r => setTimeout(r, 500));
 
-        // Asegurar que el input existe
         let searchInput = await page.$('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
         if (!searchInput) {
-            // Intentar recargar la página para recuperar el input
-            console.warn('⚠️ Input no encontrado, recargando página...');
-            await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
-            await page.waitForSelector('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]', { timeout: 10000 });
-            searchInput = await page.$('input[placeholder*="Search"], input[placeholder*="BIN"], input[maxlength="6"]');
-            if (!searchInput) throw new Error('Input de búsqueda no encontrado después de recarga');
+            console.warn('⚠️ Input no encontrado, recargando página y reautenticando...');
+            throw new Error('Input de búsqueda no encontrado');
         }
 
         await searchInput.click({ clickCount: 3 });
@@ -329,14 +347,13 @@ async function performSearch(bin) {
         let firstMatch = false;
         let firstCount = 0;
 
-        // Polling cada 500ms
         while (Date.now() - startTime < MAX_SEARCH_TIME) {
             let text;
             try {
                 text = await getPageText(page);
             } catch (error) {
                 if (error.message === 'NAVIGATION_RESET' || error.message.includes('context destroyed')) {
-                    throw error; // Propagar para que el manejador lo capture y reinicie
+                    throw error;
                 }
                 throw error;
             }
@@ -490,4 +507,4 @@ server.timeout = 1200000;
 server.keepAliveTimeout = 1200000;
 server.headersTimeout = 1200000;
 
-console.log('✅ Servidor listo con navegador persistente (modo rápido)');
+console.log('✅ Servidor listo con navegador persistente y reautenticación');
