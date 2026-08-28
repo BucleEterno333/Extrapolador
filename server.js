@@ -199,7 +199,6 @@ function startKeepAlive() {
         try {
             if (page && isReady) {
                 await page.evaluate(() => document.title);
-                console.log('💓 Keep-alive');
             } else {
                 console.warn('⚠️ Keep-alive: página no disponible, reiniciando...');
                 isReady = false;
